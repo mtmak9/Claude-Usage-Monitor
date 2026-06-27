@@ -1,0 +1,30 @@
+# Claude Usage Monitor - Python dependencies
+#
+# Core GUI framework
+PyQt6>=6.6.0
+
+# HTTP client for the Anthropic API
+httpx>=0.27.0
+
+# Secure credential storage (Windows Credential Manager)
+keyring>=24.0.0
+
+# Decrypt the Claude *desktop* app's OAuth token store (Chromium OSCrypt v10
+# AES-256-GCM).  Not needed when signed in via the standalone Claude Code CLI
+# (which writes a plaintext ~/.claude/.credentials.json), so the app degrades
+# gracefully if it is missing.
+cryptography>=42.0.0
+
+# Time-zone database (needed for US/Pacific peak-hour calculation on Windows)
+tzdata>=2024.1
+
+# TOML parsing for Python < 3.11 (3.11+ ships tomllib in the stdlib)
+tomli>=2.0.1; python_version < "3.11"
+
+# --- Optional, the app degrades gracefully if these are missing ---
+
+# Richer native Windows toast notifications (falls back to tray balloons)
+win10toast>=0.9 ; platform_system == "Windows"
+
+# Packaging the app into a single .exe (only needed for build.py)
+# pyinstaller>=6.3.0

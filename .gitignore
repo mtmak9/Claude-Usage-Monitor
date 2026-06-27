@@ -1,0 +1,30 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+env/
+
+# PyInstaller build output
+build/
+dist/
+*.spec
+
+# App runtime data (also lives in %APPDATA%/ClaudeMonitor)
+*.db
+*.log
+config.json
+
+# Credentials / OAuth tokens — NEVER commit these
+*credentials.json
+.credentials.json
+oauth_cache.json
+*.token
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+.history

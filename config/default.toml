@@ -1,0 +1,39 @@
+# Claude Usage Monitor — default configuration
+#
+# This file ships read-only defaults.  User changes are persisted to
+# %APPDATA%/ClaudeMonitor/config.json and take precedence over these values.
+
+[auth]
+# auth_type:  "oauth"   -> reads the local Claude subscription OAuth token and
+#                          calls /api/oauth/usage for real 5h/7d utilisation
+#                          (no API key needed — recommended for Pro/Max users)
+#             "api_key" -> uses a stored Anthropic API key (sk-ant-...)
+#             "mock"    -> demo data, no network / key required (try the UI)
+auth_type = "oauth"
+api_key = ""
+model = "claude-opus-4-8"
+
+[display]
+opacity = 0.95
+always_on_top = true
+compact = false
+language = "pl"        # pl | en
+pos_x = -1             # -1 => auto-place at the top-right of the primary screen
+pos_y = -1
+active_tab = 0         # 0 = DZIŚ, 1 = TYDZIEŃ, 2 = MIESIĄC
+
+[polling]
+# Seconds between refreshes.  The OAuth usage endpoint rate-limits to ~1 request
+# every 2 minutes, so OAuth mode is floored at 150s regardless of this value.
+interval = 180
+smart_polling = true   # poll more often when usage is high (capped in OAuth mode)
+
+[notifications]
+enabled = true
+threshold_80 = true
+threshold_90 = true
+threshold_100 = true
+
+[system]
+autostart = false
+minimize_to_tray = true
