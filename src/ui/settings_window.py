@@ -12,6 +12,7 @@ from PyQt6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLineEdit,
+    QMessageBox,
     QPushButton,
     QSlider,
     QSpinBox,
@@ -20,17 +21,19 @@ from PyQt6.QtWidgets import (
 
 from .. import constants
 from ..api import oauth
+from ..i18n import tr
 from ..utils import autostart, encryption
 
 
 class SettingsWindow(QDialog):
-    applied = pyqtSignal()  # emitted after a successful Save
+    applied = pyqtSignal()           # emitted after a successful Save
+    restart_requested = pyqtSignal()  # user accepted restart after a language change
 
     def __init__(self, config, client, parent=None) -> None:
         super().__init__(parent)
         self.config = config
         self.client = client
-        self.setWindowTitle("Ustawienia — Claude Usage Monitor")
+        self.setWindowTitle(tr("settings_title"))
         self.setMinimumWidth(420)
         self.setModal(False)
         self._build_ui()
@@ -49,42 +52,42 @@ class SettingsWindow(QDialog):
 
         buttons = QHBoxLayout()
         buttons.addStretch(1)
-        cancel = QPushButton("Anuluj")
+        cancel = QPushButton(tr("btn_cancel"))
         cancel.clicked.connect(self.reject)
         buttons.addWidget(cancel)
-        save = QPushButton("Zapisz")
+        save = QPushButton(tr("btn_save"))
         save.setObjectName("Primary")
         save.clicked.connect(self._on_save)
         buttons.addWidget(save)
         root.addLayout(buttons)
 
     def _auth_group(self) -> QGroupBox:
-        box = QGroupBox("Autoryzacja")
+        box = QGroupBox(tr("grp_auth"))
         form = QFormLayout(box)
 
         self.auth_type = QComboBox()
         # OAuth first — the recommended default for Pro/Max subscribers.
-        self.auth_type.addItem("OAuth — subskrypcja (zalecane)", "oauth")
-        self.auth_type.addItem("Klucz API", "api_key")
-        self.auth_type.addItem("Tryb demo (bez klucza)", "mock")
+        self.auth_type.addItem(tr("auth_oauth"), "oauth")
+        self.auth_type.addItem(tr("auth_api_key"), "api_key")
+        self.auth_type.addItem(tr("auth_demo"), "mock")
         self.auth_type.currentIndexChanged.connect(self._on_auth_changed)
-        form.addRow("Typ:", self.auth_type)
+        form.addRow(tr("auth_type"), self.auth_type)
 
         # OAuth status: which local credential we discovered (read-only).
         self.oauth_info = QLabel("")
         self.oauth_info.setWordWrap(True)
         self.oauth_info.setStyleSheet("color: #94a3b8; font-size: 11px;")
-        form.addRow("Token OAuth:", self.oauth_info)
+        form.addRow(tr("lbl_oauth_token"), self.oauth_info)
 
         # Account authorisation — anyone can log in to their own Claude account.
         login_row = QHBoxLayout()
-        self.login_btn = QPushButton("Zaloguj się przez Claude")
+        self.login_btn = QPushButton(tr("btn_login"))
         self.login_btn.clicked.connect(self._on_login)
         login_row.addWidget(self.login_btn, 1)
-        self.logout_btn = QPushButton("Wyloguj")
+        self.logout_btn = QPushButton(tr("btn_logout"))
         self.logout_btn.clicked.connect(self._on_logout)
         login_row.addWidget(self.logout_btn)
-        form.addRow("Konto:", login_row)
+        form.addRow(tr("lbl_account"), login_row)
 
         key_row = QHBoxLayout()
         self.api_key = QLineEdit()
@@ -101,16 +104,16 @@ class SettingsWindow(QDialog):
             )
         )
         key_row.addWidget(self.show_key)
-        self.api_key_label = QLabel("Klucz API:")
+        self.api_key_label = QLabel(tr("lbl_api_key"))
         form.addRow(self.api_key_label, key_row)
 
         self.model = QComboBox()
         for model_id, meta in constants.MODELS.items():
             self.model.addItem(meta["label"], model_id)
-        form.addRow("Model ping:", self.model)
+        form.addRow(tr("lbl_model_ping"), self.model)
 
         test_row = QHBoxLayout()
-        self.test_btn = QPushButton("Testuj połączenie")
+        self.test_btn = QPushButton(tr("btn_test"))
         self.test_btn.clicked.connect(self._on_test)
         test_row.addWidget(self.test_btn)
         self.test_result = QLabel("")
@@ -120,7 +123,7 @@ class SettingsWindow(QDialog):
         return box
 
     def _display_group(self) -> QGroupBox:
-        box = QGroupBox("Wygląd")
+        box = QGroupBox(tr("grp_display"))
         form = QFormLayout(box)
 
         op_row = QHBoxLayout()
@@ -132,49 +135,49 @@ class SettingsWindow(QDialog):
         )
         op_row.addWidget(self.opacity, 1)
         op_row.addWidget(self.opacity_label)
-        form.addRow("Przezroczystość:", op_row)
+        form.addRow(tr("lbl_opacity"), op_row)
 
-        self.always_on_top = QCheckBox("Zawsze na wierzchu")
+        self.always_on_top = QCheckBox(tr("chk_on_top"))
         form.addRow("", self.always_on_top)
 
-        self.compact = QCheckBox("Domyślnie tryb kompaktowy")
+        self.compact = QCheckBox(tr("chk_compact"))
         form.addRow("", self.compact)
 
         self.language = QComboBox()
-        self.language.addItem("Polski", "pl")
-        self.language.addItem("English", "en")
-        form.addRow("Język:", self.language)
+        self.language.addItem(tr("lang_pl"), "pl")
+        self.language.addItem(tr("lang_en"), "en")
+        form.addRow(tr("lbl_language"), self.language)
         return box
 
     def _polling_group(self) -> QGroupBox:
-        box = QGroupBox("Odświeżanie")
+        box = QGroupBox(tr("grp_polling"))
         form = QFormLayout(box)
         self.interval = QSpinBox()
         self.interval.setRange(constants.MIN_POLL_INTERVAL, constants.MAX_POLL_INTERVAL)
         self.interval.setSuffix(" s")
-        form.addRow("Interwał:", self.interval)
-        self.smart = QCheckBox("Inteligentne odświeżanie (szybciej przy wysokim użyciu)")
+        form.addRow(tr("lbl_interval"), self.interval)
+        self.smart = QCheckBox(tr("chk_smart"))
         form.addRow("", self.smart)
         return box
 
     def _notifications_group(self) -> QGroupBox:
-        box = QGroupBox("Powiadomienia")
+        box = QGroupBox(tr("grp_notifications"))
         layout = QVBoxLayout(box)
-        self.notify_enabled = QCheckBox("Włącz powiadomienia")
+        self.notify_enabled = QCheckBox(tr("chk_notify_enabled"))
         layout.addWidget(self.notify_enabled)
-        self.notify_80 = QCheckBox("Powiadom przy 80%")
-        self.notify_90 = QCheckBox("Powiadom przy 90%")
-        self.notify_100 = QCheckBox("Powiadom przy 100%")
+        self.notify_80 = QCheckBox(tr("chk_notify_80"))
+        self.notify_90 = QCheckBox(tr("chk_notify_90"))
+        self.notify_100 = QCheckBox(tr("chk_notify_100"))
         for cb in (self.notify_80, self.notify_90, self.notify_100):
             layout.addWidget(cb)
         return box
 
     def _system_group(self) -> QGroupBox:
-        box = QGroupBox("System")
+        box = QGroupBox(tr("grp_system"))
         layout = QVBoxLayout(box)
-        self.autostart_cb = QCheckBox("Uruchamiaj przy starcie Windows")
+        self.autostart_cb = QCheckBox(tr("chk_autostart"))
         layout.addWidget(self.autostart_cb)
-        self.min_to_tray = QCheckBox("Minimalizuj do zasobnika")
+        self.min_to_tray = QCheckBox(tr("chk_tray"))
         layout.addWidget(self.min_to_tray)
         return box
 
@@ -222,21 +225,18 @@ class SettingsWindow(QDialog):
             creds = None
         if creds:
             where = {
-                "login": "logowanie w aplikacji",
-                "monitor-cache": "logowanie w aplikacji",
-                "refreshed": "logowanie w aplikacji (odświeżony)",
-                "desktop-cache": "wykryta aplikacja Claude",
-                "env": "zmienna środowiskowa",
+                "login": tr("src_login"),
+                "monitor-cache": tr("src_login"),
+                "refreshed": tr("src_refreshed"),
+                "desktop-cache": tr("src_desktop"),
+                "env": tr("src_env"),
             }.get(creds.source, creds.source)
             self.oauth_info.setText(
-                f"✓ Wykryto ({creds.plan_label()}) — źródło: {where}"
+                tr("oauth_detected", plan=creds.plan_label(), where=where)
             )
             self.oauth_info.setStyleSheet("color: #22c55e; font-size: 11px;")
         else:
-            self.oauth_info.setText(
-                "✗ Nie znaleziono lokalnego tokenu. Zaloguj się w Claude Code / "
-                "aplikacji Claude."
-            )
+            self.oauth_info.setText(tr("oauth_not_found"))
             self.oauth_info.setStyleSheet("color: #ef4444; font-size: 11px;")
 
     def _load_values(self) -> None:
@@ -268,7 +268,7 @@ class SettingsWindow(QDialog):
 
     # ------------------------------------------------------------------ #
     def _on_test(self) -> None:
-        self.test_result.setText("Testowanie…")
+        self.test_result.setText(tr("testing"))
         self.test_result.setStyleSheet("color: #94a3b8;")
         # Stash the typed key so the client can read it during the test.
         auth = self.auth_type.currentData()
@@ -280,6 +280,7 @@ class SettingsWindow(QDialog):
         )
 
     def _on_save(self) -> None:
+        old_language = self.config.language
         self.config.set("auth.auth_type", self.auth_type.currentData())
         self.config.set("auth.model", self.model.currentData())
 
@@ -307,3 +308,16 @@ class SettingsWindow(QDialog):
         self.config.save()
         self.applied.emit()
         self.accept()
+
+        # A language change needs a clean re-render of every widget — offer to
+        # restart the app now (applies on next launch either way).
+        if self.config.language != old_language:
+            choice = QMessageBox.question(
+                self.parent() or self,
+                tr("lang_restart_title"),
+                tr("lang_restart_body"),
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.Yes,
+            )
+            if choice == QMessageBox.StandardButton.Yes:
+                self.restart_requested.emit()

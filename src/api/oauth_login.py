@@ -32,6 +32,7 @@ from typing import Optional
 from urllib.parse import urlencode
 
 from .. import constants
+from ..i18n import tr
 from .oauth import OAuthCredentials
 
 log = logging.getLogger(__name__)
@@ -95,11 +96,11 @@ class LoginSession:
         Raises ``RuntimeError`` with a human-readable message on any failure.
         """
         if not _HTTPX_OK:
-            raise RuntimeError("Brak biblioteki httpx (pip install httpx).")
+            raise RuntimeError(tr("ol_no_httpx"))
 
         text = (pasted_code or "").strip()
         if not text:
-            raise RuntimeError("Pusty kod autoryzacyjny.")
+            raise RuntimeError(tr("ol_empty_code"))
         # The callback page typically shows "<code>#<state>".
         code, state = text, self.state
         if "#" in text:
@@ -123,20 +124,20 @@ class LoginSession:
                     headers={"content-type": "application/json"},
                 )
         except Exception as exc:
-            raise RuntimeError(f"Błąd sieci: {exc}") from exc
+            raise RuntimeError(tr("ol_net_err", exc=exc)) from exc
 
         if resp.status_code != 200:
             detail = _error_detail(resp)
-            raise RuntimeError(f"Odrzucono ({resp.status_code}): {detail}")
+            raise RuntimeError(tr("ol_rejected", code=resp.status_code, detail=detail))
 
         try:
             body = resp.json()
         except Exception as exc:
-            raise RuntimeError("Nieprawidłowa odpowiedź serwera.") from exc
+            raise RuntimeError(tr("ol_bad_resp")) from exc
 
         access = body.get("access_token")
         if not access:
-            raise RuntimeError("Brak access_token w odpowiedzi.")
+            raise RuntimeError(tr("ol_no_token"))
 
         expires_in = body.get("expires_in")
         expires_at = (

@@ -12,6 +12,7 @@ from datetime import datetime, timedelta, timezone
 from typing import List
 
 from .. import constants
+from ..i18n import tr
 
 try:  # zoneinfo ships with Python 3.9+, tzdata provides the database on Windows
     from zoneinfo import ZoneInfo
@@ -87,7 +88,7 @@ def next_transition_text(dt: datetime | None = None) -> str:
         target = local.replace(
             hour=constants.PEAK_END_HOUR, minute=0, second=0, microsecond=0
         )
-        verb = "off-peak"
+        verb = tr("peak_verb_off")
     else:
         if local.hour < constants.PEAK_START_HOUR:
             target = local.replace(
@@ -97,11 +98,11 @@ def next_transition_text(dt: datetime | None = None) -> str:
             target = (local + timedelta(days=1)).replace(
                 hour=constants.PEAK_START_HOUR, minute=0, second=0, microsecond=0
             )
-        verb = "peak"
+        verb = tr("peak_verb_peak")
     delta = target - local
     seconds = max(0, int(delta.total_seconds()))
     hours, rem = divmod(seconds, 3600)
     minutes = rem // 60
     if hours > 0:
-        return f"{verb} za {hours}h {minutes}m"
-    return f"{verb} za {minutes}m"
+        return tr("peak_in_hm", verb=verb, h=hours, m=minutes)
+    return tr("peak_in_m", verb=verb, m=minutes)

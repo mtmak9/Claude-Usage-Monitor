@@ -14,6 +14,7 @@ from PyQt6.QtWidgets import QMenu, QSystemTrayIcon
 
 from .. import constants
 from ..api.models import UsageSnapshot
+from ..i18n import tr
 from .styles.colors import Colors
 
 
@@ -64,7 +65,7 @@ class Tray(QObject):
             "red": make_circle_icon(Colors.RED),
         }
         self._tray = QSystemTrayIcon(self._icons["gray"], app)
-        self._tray.setToolTip(f"{constants.APP_NAME}: łączenie…")
+        self._tray.setToolTip(f"{constants.APP_NAME}: {tr('connecting')}")
         self._menu = self._build_menu()
         self._tray.setContextMenu(self._menu)
         self._tray.activated.connect(self._on_activated)
@@ -73,35 +74,35 @@ class Tray(QObject):
     def _build_menu(self) -> QMenu:
         menu = QMenu()
 
-        self._act_show = QAction("Pokaż / ukryj widżet", menu)
+        self._act_show = QAction(tr("tray_show"), menu)
         self._act_show.triggered.connect(self.toggle_overlay.emit)
         menu.addAction(self._act_show)
 
-        self._act_compact = QAction("Tryb kompaktowy / pełny", menu)
+        self._act_compact = QAction(tr("tray_compact"), menu)
         self._act_compact.triggered.connect(self.toggle_compact.emit)
         menu.addAction(self._act_compact)
 
         menu.addSeparator()
 
-        act_refresh = QAction("Odśwież teraz", menu)
+        act_refresh = QAction(tr("tray_refresh"), menu)
         act_refresh.triggered.connect(self.refresh_now.emit)
         menu.addAction(act_refresh)
 
-        act_history = QAction("Historia użycia…", menu)
+        act_history = QAction(tr("tray_history"), menu)
         act_history.triggered.connect(self.open_history.emit)
         menu.addAction(act_history)
 
-        act_settings = QAction("Ustawienia…", menu)
+        act_settings = QAction(tr("tray_settings"), menu)
         act_settings.triggered.connect(self.open_settings.emit)
         menu.addAction(act_settings)
 
         menu.addSeparator()
 
-        act_about = QAction("O programie", menu)
+        act_about = QAction(tr("tray_about"), menu)
         act_about.triggered.connect(self.open_about.emit)
         menu.addAction(act_about)
 
-        act_quit = QAction("Zakończ", menu)
+        act_quit = QAction(tr("tray_quit"), menu)
         act_quit.triggered.connect(self.quit_app.emit)
         menu.addAction(act_quit)
         return menu
@@ -133,15 +134,14 @@ class Tray(QObject):
     def update_state(self, snap: Optional[UsageSnapshot]) -> None:
         if snap is None or not snap.ok:
             self._tray.setIcon(self._icons["gray"])
-            msg = snap.error if (snap and snap.error) else "łączenie…"
+            msg = snap.error if (snap and snap.error) else tr("connecting")
             self._tray.setToolTip(f"{constants.APP_NAME}: {msg}")
             return
         bucket = self._bucket(snap.worst_percent)
         self._tray.setIcon(self._icons[bucket])
         self._tray.setToolTip(
             f"{constants.APP_NAME}\n"
-            f"Sesja {snap.session_percent:.0f}%  |  "
-            f"Tydzień {snap.week_percent:.0f}%"
+            + tr("tray_tip", s=f"{snap.session_percent:.0f}", w=f"{snap.week_percent:.0f}")
         )
 
     def show_message(self, title: str, message: str) -> None:

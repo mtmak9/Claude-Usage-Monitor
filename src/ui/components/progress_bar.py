@@ -25,11 +25,18 @@ class GradientProgressBar(QWidget):
         self._value = 0.0           # current (animated) value 0-100
         self._target = 0.0
         self._bar_height = height
+        self._gradient_stops = None  # list[(pos, hex)] overriding the default
         self.setMinimumHeight(height)
         self.setMaximumHeight(height)
         self._anim = QPropertyAnimation(self, b"value", self)
         self._anim.setDuration(650)
         self._anim.setEasingCurve(QEasingCurve.Type.OutCubic)
+
+    def set_gradient(self, stops) -> None:
+        """Override the fill colours. ``stops`` is ``[(pos0-1, '#hex'), …]`` or
+        ``None`` to restore the default usage gradient."""
+        self._gradient_stops = stops
+        self.update()
 
     # -- animated property --------------------------------------------- #
     def get_value(self) -> float:
@@ -74,10 +81,14 @@ class GradientProgressBar(QWidget):
         fill_path.addRoundedRect(fill_rect, radius, radius)
 
         gradient = QLinearGradient(0, 0, w, 0)
-        gradient.setColorAt(0.0, QColor(Colors.GREEN))
-        gradient.setColorAt(0.55, QColor(Colors.YELLOW))
-        gradient.setColorAt(0.80, QColor(Colors.ORANGE))
-        gradient.setColorAt(1.0, QColor(Colors.RED))
+        if self._gradient_stops:
+            for pos, color in self._gradient_stops:
+                gradient.setColorAt(pos, QColor(color))
+        else:
+            gradient.setColorAt(0.0, QColor(Colors.GREEN))
+            gradient.setColorAt(0.55, QColor(Colors.YELLOW))
+            gradient.setColorAt(0.80, QColor(Colors.ORANGE))
+            gradient.setColorAt(1.0, QColor(Colors.RED))
 
         painter.setClipPath(path)  # never draw outside the track
         painter.fillPath(fill_path, gradient)

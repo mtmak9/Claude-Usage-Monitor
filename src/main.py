@@ -22,6 +22,7 @@ from PyQt6.QtGui import QGuiApplication, QIcon, QPixmap
 from PyQt6.QtWidgets import QApplication, QLabel, QMessageBox
 
 from . import constants
+from .i18n import set_language, tr
 from .api.client import AnthropicClient
 from .api.models import UsageSnapshot
 from .api.poller import Poller
@@ -66,6 +67,8 @@ class MonitorApp:
     def __init__(self, qt_app: QApplication) -> None:
         self.qt_app = qt_app
         self.config = Config()
+        # Apply the UI language *before* any widget is built.
+        set_language(self.config.language)
         self.db = Database()
         self.history = HistoryService(self.db)
         self.client = AnthropicClient(self.config)
@@ -99,6 +102,7 @@ class MonitorApp:
 
     def _connect(self) -> None:
         self.poller.snapshot_ready.connect(self._on_snapshot)
+        self.poller.tokens_ready.connect(self.overlay.update_tokens)
         self.poller.error.connect(lambda e: logging.error("poll error: %s", e))
         self.overlay.request_menu.connect(self._show_context_menu)
 
@@ -133,18 +137,10 @@ class MonitorApp:
             self.tray.update_state(snap)
 
         if fresh:
-            self.notifications.check_usage(snap.session_percent, "Sesja 5h")
-            self.notifications.check_usage(snap.week_percent, "Tydzień 7d")
-
-        # Refresh the prompt/activity sections from the right source.
-        try:
-            if self.client.effective_auth() == "mock":
-                activity = self.client.activity()
-            else:
-                activity = self.history.compute_activity()
-            self.overlay.update_activity(activity)
-        except Exception:  # activity is best-effort
-            logging.debug("activity refresh failed", exc_info=True)
+            self.notifications.check_usage(snap.session_percent, tr("notify_session"))
+            self.notifications.check_usage(snap.week_percent, tr("notify_week"))
+        # Token usage (and the hourly activity chart) arrive separately via the
+        # poller's tokens_ready signal → overlay.update_tokens.
 
     # ------------------------------------------------------------------ #
     # UI actions
@@ -165,6 +161,7 @@ class MonitorApp:
         if self._settings_win is None:
             self._settings_win = SettingsWindow(self.config, self.client)
             self._settings_win.applied.connect(self._apply_settings)
+            self._settings_win.restart_requested.connect(self._restart_app)
         self._settings_win.show()
         self._settings_win.raise_()
         self._settings_win.activateWindow()
@@ -187,16 +184,16 @@ class MonitorApp:
 
     def _open_about(self) -> None:
         box = QMessageBox(self.overlay)
-        box.setWindowTitle(f"O programie — {constants.APP_NAME}")
+        box.setWindowTitle(tr("about_title", app=constants.APP_NAME))
         box.setTextFormat(Qt.TextFormat.RichText)
         box.setText(
             f"<b>{constants.APP_NAME}</b> v{constants.APP_VERSION}<br><br>"
-            "Monitor limitów użycia Claude w czasie rzeczywistym.<br>"
-            "Widżet zawsze na wierzchu + ikona w zasobniku.<br><br>"
-            f"Autor: <b>{constants.APP_AUTHOR_NAME}</b> "
+            f"{tr('about_desc1')}<br>"
+            f"{tr('about_desc2')}<br><br>"
+            f"{tr('about_author')}: <b>{constants.APP_AUTHOR_NAME}</b> "
             f'(<a href="{constants.APP_GITHUB}">{constants.APP_GITHUB}</a>)<br>'
-            f"Tryb: <b>{self.client.effective_auth()}</b><br>"
-            f"Folder danych: {constants.DATA_DIR}"
+            f"{tr('about_mode')}: <b>{self.client.effective_auth()}</b><br>"
+            f"{tr('about_data')}: {constants.DATA_DIR}"
         )
         # Show the app icon and make the GitHub link clickable (opens in browser).
         icon_path = constants.ASSETS_DIR / "app.png"
@@ -212,6 +209,22 @@ class MonitorApp:
             label.setOpenExternalLinks(True)
             label.setTextInteractionFlags(Qt.TextInteractionFlag.TextBrowserInteraction)
         box.exec()
+
+    def _restart_app(self) -> None:
+        """Relaunch the app (used after a language change) then quit this one."""
+        import sys
+
+        from PyQt6.QtCore import QProcess
+
+        try:
+            self.config.save()
+            if getattr(sys, "frozen", False):
+                QProcess.startDetached(sys.executable, sys.argv[1:])
+            else:
+                QProcess.startDetached(sys.executable, sys.argv)
+        except Exception:
+            logging.exception("restart failed")
+        self._quit()
 
     def _quit(self) -> None:
         try:

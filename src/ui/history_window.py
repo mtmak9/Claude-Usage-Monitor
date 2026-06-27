@@ -24,6 +24,7 @@ from PyQt6.QtWidgets import (
 )
 
 from ..api.models import DailyUsageRecord
+from ..i18n import tr
 from .styles.colors import Colors
 
 
@@ -45,7 +46,7 @@ class _BarChart(QWidget):
 
         if not self._data:
             painter.setPen(QColor(Colors.TEXT_MUTED))
-            painter.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter, "Brak danych")
+            painter.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter, tr("hist_no_data"))
             painter.end()
             return
 
@@ -100,7 +101,7 @@ class _LineChart(QWidget):
         if len(self._series) < 2:
             painter.setPen(QColor(Colors.TEXT_MUTED))
             painter.drawText(
-                self.rect(), Qt.AlignmentFlag.AlignCenter, "Za mało danych (24h)"
+                self.rect(), Qt.AlignmentFlag.AlignCenter, tr("hist_too_few")
             )
             painter.end()
             return
@@ -126,7 +127,7 @@ class HistoryWindow(QDialog):
     def __init__(self, history_service, parent=None) -> None:
         super().__init__(parent)
         self.history = history_service
-        self.setWindowTitle("Historia użycia — Claude Usage Monitor")
+        self.setWindowTitle(tr("hist_title"))
         self.setMinimumSize(560, 560)
         self._build_ui()
         self.reload()
@@ -136,26 +137,29 @@ class HistoryWindow(QDialog):
         root.setSpacing(10)
 
         head = QHBoxLayout()
-        title = QLabel("Historia użycia")
+        title = QLabel(tr("hist_heading"))
         title.setFont(QFont("Segoe UI", 14, QFont.Weight.Bold))
         head.addWidget(title)
         head.addStretch(1)
-        reload_btn = QPushButton("Odśwież")
+        reload_btn = QPushButton(tr("hist_reload"))
         reload_btn.clicked.connect(self.reload)
         head.addWidget(reload_btn)
         root.addLayout(head)
 
-        root.addWidget(self._section_label("Prompty dziennie (ostatnie 14 dni)"))
+        root.addWidget(self._section_label(tr("hist_daily_prompts")))
         self.bar = _BarChart()
         root.addWidget(self.bar)
 
-        root.addWidget(self._section_label("Wykorzystanie sesji 5h (ostatnie 24h)"))
+        root.addWidget(self._section_label(tr("hist_session_util")))
         self.line = _LineChart()
         root.addWidget(self.line)
 
-        root.addWidget(self._section_label("Szczegóły dzienne"))
+        root.addWidget(self._section_label(tr("hist_details")))
         self.table = QTableWidget(0, 4)
-        self.table.setHorizontalHeaderLabels(["Data", "Prompty", "Szczyt sesji", "Szczyt tyg."])
+        self.table.setHorizontalHeaderLabels([
+            tr("hist_col_date"), tr("hist_col_prompts"),
+            tr("hist_col_peak_session"), tr("hist_col_peak_week"),
+        ])
         self.table.verticalHeader().setVisible(False)
         self.table.horizontalHeader().setStretchLastSection(True)
         self.table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)

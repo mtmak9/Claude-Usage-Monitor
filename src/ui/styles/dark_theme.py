@@ -58,6 +58,14 @@ def build_stylesheet() -> str:
     QLabel#BigNumber {{ color: {c.TEXT_PRIMARY}; font-size: 40px; font-weight: 800; }}
     QLabel#Value {{ color: {c.TEXT_PRIMARY}; font-weight: 700; }}
 
+    /* Reset countdown text — bold & coloured to pair with the reset bar (the
+       exact colour is set per-state in code, switching to orange near reset). */
+    QLabel#ResetBadge {{
+        color: {c.CYAN};
+        font-size: 11px;
+        font-weight: 800;
+    }}
+
     /* ---- Buttons ---- */
     QPushButton {{
         background-color: {c.BG_TERTIARY};

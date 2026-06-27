@@ -20,6 +20,7 @@ log = logging.getLogger(__name__)
 class _WorkerSignals(QObject):
     snapshot = pyqtSignal(object)   # UsageSnapshot
     activity = pyqtSignal(object)   # ActivityData
+    tokens = pyqtSignal(object)     # TokenUsage
     failed = pyqtSignal(str)
 
 
@@ -39,6 +40,12 @@ class _FetchWorker(QRunnable):
                     self.signals.activity.emit(self.client.activity())
                 except Exception:  # activity is best-effort
                     pass
+                try:
+                    # Parsing the local token logs can take a moment — fine here,
+                    # we're on a pool thread, not the GUI thread.
+                    self.signals.tokens.emit(self.client.token_usage())
+                except Exception:  # tokens are best-effort
+                    pass
         except Exception as exc:  # pragma: no cover - defensive
             log.exception("poll worker crashed")
             self.signals.failed.emit(str(exc))
@@ -49,6 +56,7 @@ class Poller(QObject):
 
     snapshot_ready = pyqtSignal(object)   # UsageSnapshot
     activity_ready = pyqtSignal(object)   # ActivityData
+    tokens_ready = pyqtSignal(object)     # TokenUsage
     error = pyqtSignal(str)
 
     def __init__(self, client, config) -> None:
@@ -97,6 +105,7 @@ class Poller(QObject):
         worker = _FetchWorker(self.client, want_activity=True)
         worker.signals.snapshot.connect(self._on_snapshot)
         worker.signals.activity.connect(self.activity_ready.emit)
+        worker.signals.tokens.connect(self.tokens_ready.emit)
         worker.signals.failed.connect(self.error.emit)
         self._pool.start(worker)
 

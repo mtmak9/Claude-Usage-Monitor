@@ -9,6 +9,8 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Optional
 
+from ..i18n import tr
+
 
 def _now() -> datetime:
     return datetime.now(timezone.utc)
@@ -111,15 +113,15 @@ class UsageSnapshot:
         delta = target - _now()
         seconds = int(delta.total_seconds())
         if seconds <= 0:
-            return "teraz"
+            return tr("now")
         hours, rem = divmod(seconds, 3600)
         minutes = rem // 60
         if hours >= 24:
             days = hours // 24
-            return f"za {days}d {hours % 24}h"
+            return tr("in_dh", d=days, h=hours % 24)
         if hours > 0:
-            return f"za {hours}h {minutes}m"
-        return f"za {minutes}m"
+            return tr("in_hm", h=hours, m=minutes)
+        return tr("in_m", m=minutes)
 
     @property
     def session_reset_text(self) -> str:
@@ -128,6 +130,29 @@ class UsageSnapshot:
     @property
     def week_reset_text(self) -> str:
         return self._format_delta(self.week_reset)
+
+    @staticmethod
+    def _elapsed_fraction(target: Optional[datetime], window_seconds: float) -> float:
+        """How far through the rolling window we are (0-100): 0 just after a
+        reset, ~100 just before the next one."""
+        if not target or window_seconds <= 0:
+            return 0.0
+        remaining = (target - _now()).total_seconds()
+        if remaining <= 0:
+            return 100.0
+        if remaining >= window_seconds:
+            return 0.0
+        return _clamp((1.0 - remaining / window_seconds) * 100.0)
+
+    @property
+    def session_reset_percent(self) -> float:
+        from .. import constants
+        return self._elapsed_fraction(self.session_reset, constants.SESSION_WINDOW_SECONDS)
+
+    @property
+    def week_reset_percent(self) -> float:
+        from .. import constants
+        return self._elapsed_fraction(self.week_reset, constants.WEEK_WINDOW_SECONDS)
 
     @property
     def cycle_renews_text(self) -> str:

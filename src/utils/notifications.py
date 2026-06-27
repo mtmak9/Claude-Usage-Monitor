@@ -10,6 +10,7 @@ import logging
 from typing import Optional
 
 from .. import constants
+from ..i18n import tr
 
 log = logging.getLogger(__name__)
 
@@ -83,8 +84,7 @@ class NotificationManager:
             emoji = "🔴" if crossed >= 100 else ("🟠" if crossed >= 90 else "🟡")
             self._emit(
                 f"{emoji} Claude Usage Monitor",
-                f"{window_label}: wykorzystano {percent:.0f}% "
-                f"(próg {crossed:.0f}%)",
+                tr("notify_body", label=window_label, pct=int(round(percent)), th=int(crossed)),
             )
 
     def notify(self, title: str, message: str) -> None:

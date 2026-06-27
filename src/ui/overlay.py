@@ -4,7 +4,7 @@ Frameless, translucent, draggable.  Renders every usage section:
 
     TAB BAR  →  PROMPTY  →  MODEL  →  LIMITY  →  SUBSKRYPCJA  →  PEAK  →  AKTYWNOŚĆ
 
-It is purely a *view*: ``update_snapshot`` / ``update_activity`` feed it data and
+It is purely a *view*: ``update_snapshot`` / ``update_tokens`` feed it data and
 it animates the change.  No network or storage logic lives here.
 """
 from __future__ import annotations
@@ -25,17 +25,34 @@ from PyQt6.QtWidgets import (
 )
 
 from .. import constants
-from ..api.models import ActivityData, UsageSnapshot
+from ..api.models import UsageSnapshot
+from ..i18n import tr
+from ..storage.token_usage import TokenUsage
 from .components.activity_chart import ActivityChart
 from .components.circular_gauge import CircularGauge
 from .components.model_badge import ModelBadge
 from .components.peak_indicator import PeakIndicator
 from .components.progress_bar import GradientProgressBar
-from .components.prompt_counter import PromptCounter
 from .styles.colors import Colors
 
-_TAB_LABELS = ("DZIŚ", "TYDZIEŃ", "MIESIĄC")
-_PROMPT_CAPTIONS = ("promptów dziś", "promptów w tygodniu", "promptów w miesiącu")
+_TAB_KEYS = ("tab_today", "tab_week", "tab_month")
+_TOKEN_CAPTION_KEYS = ("tokens_today", "tokens_week", "tokens_month")
+
+
+def _fmt_tokens(n: int) -> str:
+    if n >= 1_000_000:
+        return f"{n / 1_000_000:.1f}M"
+    if n >= 1_000:
+        return f"{n / 1_000:.1f}K"
+    return str(int(n))
+
+
+def _strip_in(text: str) -> str:
+    """Drop the leading 'za '/'in ' from a countdown so only the duration shows."""
+    for prefix in ("za ", "in "):
+        if text.startswith(prefix):
+            return text[len(prefix):]
+    return text
 
 
 class Overlay(QWidget):
@@ -45,7 +62,7 @@ class Overlay(QWidget):
         super().__init__()
         self.config = config
         self._snapshot: Optional[UsageSnapshot] = None
-        self._activity: Optional[ActivityData] = None
+        self._tokens: Optional[TokenUsage] = None
         self._drag_offset: Optional[QPoint] = None
         self._compact = bool(config.compact)
         self._active_tab = config.active_tab
@@ -86,8 +103,8 @@ class Overlay(QWidget):
 
         root_layout.addLayout(self._build_header())
         root_layout.addLayout(self._build_tabs())
-        self._prompty_card = self._build_prompty()
-        root_layout.addWidget(self._prompty_card)
+        self._tokens_card = self._build_tokens()
+        root_layout.addWidget(self._tokens_card)
         self._model_card = self._build_model()
         root_layout.addWidget(self._model_card)
         self._limity_card = self._build_limity()
@@ -119,14 +136,14 @@ class Overlay(QWidget):
         self._btn_compact = QPushButton("▾")
         self._btn_compact.setObjectName("IconButton")
         self._btn_compact.setFixedSize(24, 24)
-        self._btn_compact.setToolTip("Tryb kompaktowy / pełny")
+        self._btn_compact.setToolTip(tr("tip_compact"))
         self._btn_compact.clicked.connect(lambda: self.toggle_compact())
         row.addWidget(self._btn_compact)
 
         self._btn_close = QPushButton("✕")
         self._btn_close.setObjectName("IconButton")
         self._btn_close.setFixedSize(24, 24)
-        self._btn_close.setToolTip("Ukryj (działa dalej w zasobniku)")
+        self._btn_close.setToolTip(tr("tip_hide"))
         self._btn_close.clicked.connect(self.hide)
         row.addWidget(self._btn_close)
         return row
@@ -137,8 +154,8 @@ class Overlay(QWidget):
         row.setSpacing(6)
         self._tab_group = QButtonGroup(self)
         self._tab_group.setExclusive(True)
-        for i, label in enumerate(_TAB_LABELS):
-            btn = QPushButton(label)
+        for i, key in enumerate(_TAB_KEYS):
+            btn = QPushButton(tr(key))
             btn.setObjectName("Tab")
             btn.setCheckable(True)
             btn.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -148,10 +165,28 @@ class Overlay(QWidget):
         return row
 
     # -- prompty -------------------------------------------------------- #
-    def _build_prompty(self) -> QFrame:
-        card, layout = self._card("PROMPTY")
-        self._prompt_counter = PromptCounter()
-        layout.addWidget(self._prompt_counter)
+    def _build_tokens(self) -> QFrame:
+        card, layout = self._card(tr("card_tokens"))
+        row = QHBoxLayout()
+        row.setSpacing(12)
+        self._tokens_number = QLabel("0")
+        self._tokens_number.setFont(QFont("Segoe UI", 30, QFont.Weight.ExtraBold))
+        row.addWidget(self._tokens_number, 0, Qt.AlignmentFlag.AlignVCenter)
+
+        col = QVBoxLayout()
+        col.setSpacing(2)
+        col.addStretch(1)
+        self._tokens_caption = QLabel(tr("tokens_today"))
+        self._tokens_caption.setObjectName("Secondary")
+        self._tokens_caption.setWordWrap(True)
+        col.addWidget(self._tokens_caption)
+        self._tokens_breakdown = QLabel("—")
+        self._tokens_breakdown.setObjectName("Muted")
+        self._tokens_breakdown.setStyleSheet(f"color: {Colors.TEXT_MUTED}; font-size: 9px;")
+        col.addWidget(self._tokens_breakdown)
+        col.addStretch(1)
+        row.addLayout(col, 1)
+        layout.addLayout(row)
         return card
 
     # -- model ---------------------------------------------------------- #
@@ -163,15 +198,21 @@ class Overlay(QWidget):
 
     # -- limity --------------------------------------------------------- #
     def _build_limity(self) -> QFrame:
-        card, layout = self._card("LIMITY")
+        card, layout = self._card(tr("card_limits"))
 
-        self._session_bar, self._session_pct, self._session_reset = self._limit_row(
-            layout, "SESJA 5H"
-        )
+        (
+            self._session_bar,
+            self._session_pct,
+            self._session_reset,
+            self._session_reset_bar,
+        ) = self._limit_row(layout, tr("limit_session"))
         layout.addSpacing(4)
-        self._week_bar, self._week_pct, self._week_reset = self._limit_row(
-            layout, "TYDZIEŃ 7D"
-        )
+        (
+            self._week_bar,
+            self._week_pct,
+            self._week_reset,
+            self._week_reset_bar,
+        ) = self._limit_row(layout, tr("limit_week"))
         return card
 
     def _limit_row(self, parent_layout: QVBoxLayout, label: str):
@@ -188,17 +229,20 @@ class Overlay(QWidget):
         bar = GradientProgressBar(height=10)
         parent_layout.addWidget(bar)
 
+        # Thin "time until reset" bar + countdown text on one row.
         sub = QHBoxLayout()
-        sub.addStretch(1)
+        sub.setSpacing(8)
+        reset_bar = GradientProgressBar(height=6)
+        sub.addWidget(reset_bar, 1)
         reset = QLabel("—")
-        reset.setObjectName("Muted")
-        sub.addWidget(reset)
+        reset.setObjectName("ResetBadge")
+        sub.addWidget(reset, 0)
         parent_layout.addLayout(sub)
-        return bar, pct, reset
+        return bar, pct, reset, reset_bar
 
     # -- subscription --------------------------------------------------- #
     def _build_subscription(self) -> QFrame:
-        card, layout = self._card("SUBSKRYPCJA")
+        card, layout = self._card(tr("card_subscription"))
         row = QHBoxLayout()
         row.setSpacing(14)
 
@@ -209,10 +253,10 @@ class Overlay(QWidget):
         grid.setHorizontalSpacing(6)
         grid.setVerticalSpacing(6)
         grid.setColumnStretch(1, 1)
-        self._sub_status = self._kv(grid, 0, "Status")
-        self._sub_cycle = self._kv(grid, 1, "Cykl")
-        self._sub_renews = self._kv(grid, 2, "Odnowienie")
-        self._sub_left = self._kv(grid, 3, "Pozostało")
+        self._sub_status = self._kv(grid, 0, tr("kv_status"))
+        self._sub_cycle = self._kv(grid, 1, tr("kv_cycle"))
+        self._sub_renews = self._kv(grid, 2, tr("kv_renews"))
+        self._sub_left = self._kv(grid, 3, tr("kv_remaining"))
         row.addLayout(grid, 1)
 
         layout.addLayout(row)
@@ -220,7 +264,7 @@ class Overlay(QWidget):
 
     # -- credits -------------------------------------------------------- #
     def _build_credits(self) -> QFrame:
-        card, layout = self._card("KREDYTY $")
+        card, layout = self._card(tr("card_credits"))
 
         top = QHBoxLayout()
         self._credits_badge = QLabel("—")
@@ -239,14 +283,12 @@ class Overlay(QWidget):
         grid.setHorizontalSpacing(6)
         grid.setVerticalSpacing(6)
         grid.setColumnStretch(1, 1)
-        self._credits_used = self._kv(grid, 0, "Wydano")
-        self._credits_limit = self._kv(grid, 1, "Limit miesięczny")
-        self._credits_balance = self._kv(grid, 2, "Saldo")
+        self._credits_used = self._kv(grid, 0, tr("kv_spent"))
+        self._credits_limit = self._kv(grid, 1, tr("kv_monthly_limit"))
+        self._credits_balance = self._kv(grid, 2, tr("kv_balance"))
         layout.addLayout(grid)
 
-        self._credits_hint = QLabel(
-            "Włącz „Usage credits” w ustawieniach Claude, aby śledzić saldo."
-        )
+        self._credits_hint = QLabel(tr("credits_hint"))
         self._credits_hint.setObjectName("Muted")
         self._credits_hint.setWordWrap(True)
         self._credits_hint.setStyleSheet(f"color: {Colors.TEXT_MUTED}; font-size: 9px;")
@@ -267,9 +309,9 @@ class Overlay(QWidget):
 
     # -- peak ----------------------------------------------------------- #
     def _build_peak(self) -> QFrame:
-        card, layout = self._card("PEAK HOURS")
+        card, layout = self._card(tr("card_peak"))
         top = QHBoxLayout()
-        self._peak_badge = QLabel("OFF-PEAK")
+        self._peak_badge = QLabel(tr("peak_off"))
         self._peak_badge.setObjectName("Value")
         self._style_peak_badge(False)
         top.addWidget(self._peak_badge)
@@ -285,7 +327,7 @@ class Overlay(QWidget):
 
     def _style_peak_badge(self, is_peak: bool) -> None:
         color = Colors.PEAK if is_peak else Colors.OFF_PEAK
-        self._peak_badge.setText("PEAK" if is_peak else "OFF-PEAK")
+        self._peak_badge.setText(tr("peak_on") if is_peak else tr("peak_off"))
         self._peak_badge.setStyleSheet(
             f"color: {color}; font-weight: 800; letter-spacing: 1px;"
             f"background: {Colors.with_alpha(color, 0.14)};"
@@ -294,7 +336,7 @@ class Overlay(QWidget):
 
     # -- activity ------------------------------------------------------- #
     def _build_activity(self) -> QFrame:
-        card, layout = self._card("AKTYWNOŚĆ")
+        card, layout = self._card(tr("card_activity"))
         self._activity_chart = ActivityChart()
         layout.addWidget(self._activity_chart)
         return card
@@ -322,18 +364,19 @@ class Overlay(QWidget):
 
         if not snap.ok:
             self._status_dot.setStyleSheet(f"color: {Colors.RED};")
-            self._status_dot.setToolTip(f"Błąd: {snap.error}")
-            self._model_badge.set_usage("offline", snap.error or "")
+            self._status_dot.setToolTip(tr("error_prefix", msg=snap.error))
+            self._model_badge.set_usage(tr("offline"), snap.error or "")
             return
 
         self._status_dot.setStyleSheet(f"color: {Colors.GREEN};")
-        self._status_dot.setToolTip("Połączono")
+        self._status_dot.setToolTip(tr("connected"))
 
         # Model badge
         worst = snap.worst_percent
         self._model_badge.set_model(snap.model, Colors.for_utilization(worst))
         self._model_badge.set_usage(
-            f"{int(round(snap.session_percent))}%", f"tydz {int(round(snap.week_percent))}%"
+            f"{int(round(snap.session_percent))}%",
+            tr("wk_prefix", pct=int(round(snap.week_percent))),
         )
 
         # Limity
@@ -342,27 +385,33 @@ class Overlay(QWidget):
         self._session_pct.setStyleSheet(
             f"color: {Colors.for_utilization(snap.session_percent)}; font-weight:700;"
         )
-        self._session_reset.setText(f"reset {snap.session_reset_text}")
+        self._update_reset(
+            self._session_reset_bar, self._session_reset,
+            snap.session_reset_percent, f"{tr('reset')} {snap.session_reset_text}",
+        )
 
         self._week_bar.animate_to(snap.week_percent)
         self._week_pct.setText(f"{int(round(snap.week_percent))}%")
         self._week_pct.setStyleSheet(
             f"color: {Colors.for_utilization(snap.week_percent)}; font-weight:700;"
         )
-        self._week_reset.setText(f"reset {snap.week_reset_text}")
+        self._update_reset(
+            self._week_reset_bar, self._week_reset,
+            snap.week_reset_percent, f"{tr('reset')} {snap.week_reset_text}",
+        )
 
         # Subscription
         self._sub_gauge.animate_to(snap.subscription_percent)
         self._sub_status.setText(snap.plan_name)
         self._sub_cycle.setText(snap.cycle_label)
-        self._sub_renews.setText(snap.cycle_renews_text.replace("za ", ""))
+        self._sub_renews.setText(_strip_in(snap.cycle_renews_text))
         self._sub_left.setText(f"{int(round(100 - snap.subscription_percent))}%")
 
         # Kredyty ($)
         if snap.credits_enabled:
-            self._credits_badge.setText("Włączone")
+            self._credits_badge.setText(tr("credits_enabled"))
             self._credits_badge.setStyleSheet(f"color: {Colors.GREEN}; font-weight:700;")
-            self._credits_pct.setText(f"{int(round(snap.credits_percent))}% limitu")
+            self._credits_pct.setText(tr("credits_pct_limit", pct=int(round(snap.credits_percent))))
             self._credits_bar.show()
             self._credits_hint.hide()
             self._credits_used.setText(snap.credits_used_text)
@@ -371,7 +420,7 @@ class Overlay(QWidget):
         else:
             # Feature off in the Claude account → the usage API returns no
             # balance/limit, so say so plainly instead of showing blank dashes.
-            self._credits_badge.setText("Wyłączone")
+            self._credits_badge.setText(tr("credits_disabled"))
             self._credits_badge.setStyleSheet(f"color: {Colors.TEXT_MUTED}; font-weight:700;")
             self._credits_pct.setText("")
             self._credits_bar.hide()
@@ -387,29 +436,50 @@ class Overlay(QWidget):
 
         self._peak_next.setText(peak_hours.next_transition_text())
 
-    def update_activity(self, activity: ActivityData) -> None:
-        self._activity = activity
-        if activity is None:
+    def update_tokens(self, tokens: TokenUsage) -> None:
+        self._tokens = tokens
+        if tokens is None:
             return
-        self._activity_chart.set_values(activity.hourly)
-        self._prompt_counter.set_timeline(activity.timeline)
-        self._refresh_prompt_count()
+        self._activity_chart.set_values(tokens.hourly)
+        self._refresh_token_count()
 
-    def _refresh_prompt_count(self) -> None:
-        if not self._activity:
+    def _refresh_token_count(self) -> None:
+        if not self._tokens:
             return
-        count = self._activity.prompts_for_tab(self._active_tab)
-        self._prompt_counter.set_count(count, _PROMPT_CAPTIONS[self._active_tab])
+        total = self._tokens.headline_for_tab(self._active_tab)
+        self._tokens_number.setText(_fmt_tokens(total))
+        self._tokens_caption.setText(tr(_TOKEN_CAPTION_KEYS[self._active_tab]))
+        inp, out, cache = self._tokens.breakdown_for_tab(self._active_tab)
+        self._tokens_breakdown.setText(
+            tr("tokens_breakdown", i=_fmt_tokens(inp), o=_fmt_tokens(out), c=_fmt_tokens(cache))
+        )
 
     def refresh_dynamic(self) -> None:
         """Called ~1/s to keep countdowns and the peak marker current."""
         self._peak_bar.refresh()
         if self._snapshot and self._snapshot.ok:
-            self._session_reset.setText(f"reset {self._snapshot.session_reset_text}")
-            self._week_reset.setText(f"reset {self._snapshot.week_reset_text}")
-            self._sub_renews.setText(
-                self._snapshot.cycle_renews_text.replace("za ", "")
+            snap = self._snapshot
+            self._update_reset(
+                self._session_reset_bar, self._session_reset,
+                snap.session_reset_percent, f"{tr('reset')} {snap.session_reset_text}",
             )
+            self._update_reset(
+                self._week_reset_bar, self._week_reset,
+                snap.week_reset_percent, f"{tr('reset')} {snap.week_reset_text}",
+            )
+            self._sub_renews.setText(_strip_in(snap.cycle_renews_text))
+
+    def _update_reset(self, bar, label, pct: float, text: str) -> None:
+        """Drive a 'time until reset' bar + its countdown text, switching to a
+        warm alert colour as the reset gets close (>=90% of the window elapsed)."""
+        if pct >= 90:
+            bar.set_gradient([(0.0, "#fb923c"), (1.0, Colors.ORANGE)])
+            label.setStyleSheet(f"color: {Colors.ORANGE}; font-weight: 800; font-size: 11px;")
+        else:
+            bar.set_gradient([(0.0, Colors.CYAN), (1.0, Colors.BLUE)])
+            label.setStyleSheet(f"color: {Colors.CYAN}; font-weight: 800; font-size: 11px;")
+        bar.set_value(pct)
+        label.setText(text)
 
     # ------------------------------------------------------------------ #
     # Tabs & compact mode
@@ -419,7 +489,7 @@ class Overlay(QWidget):
         btn = self._tab_group.button(index)
         if btn:
             btn.setChecked(True)
-        self._refresh_prompt_count()
+        self._refresh_token_count()
         if persist:
             self.config.set("display.active_tab", index)
             self.config.save()

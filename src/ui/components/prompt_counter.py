@@ -13,6 +13,7 @@ from PyQt6.QtCore import (
 from PyQt6.QtGui import QColor, QFont, QPainter, QPainterPath
 from PyQt6.QtWidgets import QHBoxLayout, QLabel, QVBoxLayout, QWidget
 
+from ...i18n import tr
 from ...utils import peak_hours
 from ..styles.colors import Colors
 
@@ -74,7 +75,7 @@ class PromptCounter(QWidget):
 
         right = QVBoxLayout()
         right.setSpacing(4)
-        self._caption = QLabel("promptów dziś")
+        self._caption = QLabel(tr("prompts_today"))
         self._caption.setObjectName("Secondary")
         right.addStretch(1)
         right.addWidget(self._caption)

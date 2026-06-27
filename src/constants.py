@@ -13,7 +13,7 @@ from pathlib import Path
 # --------------------------------------------------------------------------- #
 APP_NAME = "Claude Usage Monitor"
 APP_ID = "ClaudeMonitor"          # used for folders / registry / single-instance
-APP_VERSION = "1.0.0"
+APP_VERSION = "1.1.1"
 APP_AUTHOR = "Claude Usage Monitor"
 ORG_DOMAIN = "claude-monitor.local"
 
@@ -129,6 +129,10 @@ MIN_OAUTH_POLL_INTERVAL = 150
 # Smart polling: poll faster when usage is high.
 SMART_POLL_FAST = 30
 SMART_POLL_SLOW = 300
+
+# Rolling usage window durations (seconds) — used to draw the reset progress bar.
+SESSION_WINDOW_SECONDS = 5 * 3600        # 5-hour session window
+WEEK_WINDOW_SECONDS = 7 * 24 * 3600      # 7-day weekly window
 
 # --------------------------------------------------------------------------- #
 # Peak hours (US / Pacific) — Anthropic's documented heavy-traffic window.

@@ -7,6 +7,7 @@ from PyQt6.QtCore import QRectF, Qt
 from PyQt6.QtGui import QColor, QPainter, QPainterPath
 from PyQt6.QtWidgets import QWidget
 
+from ...i18n import tr
 from ..styles.colors import Colors
 
 
@@ -52,11 +53,11 @@ class ActivityChart(QWidget):
         painter.drawText(
             QRectF(0, baseline + 1, 40, 11),
             Qt.AlignmentFlag.AlignLeft,
-            "-24h",
+            tr("act_minus24h"),
         )
         painter.drawText(
             QRectF(w - 40, baseline + 1, 40, 11),
             Qt.AlignmentFlag.AlignRight,
-            "teraz",
+            tr("act_now"),
         )
         painter.end()

@@ -24,12 +24,14 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional, Tuple
 
 from .. import constants
+from ..i18n import tr
 from ..utils import peak_hours
 from . import oauth
 from .headers import parse_rate_limit_headers
 from .models import ActivityData, UsageSnapshot
 from .oauth import load_credentials
 from .usage import parse_oauth_usage
+from ..storage.token_usage import TokenUsage, TokenUsageReader
 
 log = logging.getLogger(__name__)
 
@@ -47,6 +49,7 @@ class AnthropicClient:
         self.config = config
         self._mock = MockGenerator()
         self._last_oauth_good: Optional[UsageSnapshot] = None
+        self._token_reader = TokenUsageReader()
 
     # ------------------------------------------------------------------ #
     # Credentials
@@ -85,7 +88,7 @@ class AnthropicClient:
             return snap
 
         if not _HTTPX_OK:
-            return UsageSnapshot(error="Brak biblioteki httpx", model=self.config.model)
+            return UsageSnapshot(error=tr("cl_no_httpx"), model=self.config.model)
 
         if mode == "oauth":
             return self._oauth_snapshot()
@@ -118,7 +121,7 @@ class AnthropicClient:
         """Read 5h/7d subscription utilisation from ``/api/oauth/usage``."""
         creds = load_credentials()
         if not creds:
-            return UsageSnapshot(error="Nie znaleziono tokenu OAuth", model=self.config.model)
+            return UsageSnapshot(error=tr("cl_no_oauth_short"), model=self.config.model)
         try:
             resp = self._fetch_oauth_usage(creds.access_token)
             # Token rejected? Refresh once and retry before giving up.
@@ -139,7 +142,7 @@ class AnthropicClient:
                 if stale is not None:
                     return stale
                 return UsageSnapshot(error=None, model=self.config.model, is_stale=True)
-            msg = "Token OAuth wygasł (401)" if code == 401 else f"HTTP {code}"
+            msg = tr("cl_oauth_expired") if code == 401 else tr("cl_http_err", code=code)
             return UsageSnapshot(error=msg, model=self.config.model)
         except Exception as exc:
             # Transient network blip — prefer last good data over a hard error.
@@ -186,6 +189,12 @@ class AnthropicClient:
         """Activity arrays for the mock mode (real mode uses the DB history)."""
         return self._mock.activity()
 
+    def token_usage(self) -> TokenUsage:
+        """Token usage from the local Claude Code logs (or demo numbers in mock)."""
+        if self.effective_auth() == "mock":
+            return self._mock.token_usage()
+        return self._token_reader.read()
+
     # ------------------------------------------------------------------ #
     # Connection test (used by the Settings dialog)
     # ------------------------------------------------------------------ #
@@ -194,14 +203,14 @@ class AnthropicClient:
     ) -> Tuple[bool, str]:
         auth_type = auth_type or self.config.auth_type
         if auth_type == "mock":
-            return True, "Tryb demonstracyjny działa — brak połączenia sieciowego."
+            return True, tr("cl_mock_ok")
         if not _HTTPX_OK:
-            return False, "Brak biblioteki httpx (pip install httpx)."
+            return False, tr("cl_no_httpx_pip")
         try:
             if auth_type == "oauth":
                 creds = load_credentials()
                 if not creds:
-                    return False, "Nie znaleziono lokalnego tokenu OAuth."
+                    return False, tr("cl_no_oauth")
                 resp = self._fetch_oauth_usage(creds.access_token)
                 if resp.status_code == 401 and creds.refresh_token:
                     refreshed = oauth.refresh_credentials(creds)
@@ -212,35 +221,33 @@ class AnthropicClient:
                 snap = parse_oauth_usage(
                     resp.json(), model=self.config.model, plan_name=creds.plan_label()
                 )
-                return True, (
-                    f"Połączono ({creds.plan_label()}). "
-                    f"Sesja {snap.session_percent:.0f}% / "
-                    f"Tydzień {snap.week_percent:.0f}%"
+                return True, tr(
+                    "cl_connected_plan",
+                    plan=creds.plan_label(),
+                    s=f"{snap.session_percent:.0f}",
+                    w=f"{snap.week_percent:.0f}",
                 )
 
             key = api_key or self._api_key()
             if not key:
-                return False, "Nie podano klucza API."
+                return False, tr("cl_no_key")
             resp = self._ping_api_key(key)
             snap = parse_rate_limit_headers(resp.headers, model=self.config.model)
-            return True, (
-                "Połączono. "
-                f"Sesja {snap.session_percent:.0f}% / Tydzień {snap.week_percent:.0f}%"
+            return True, tr(
+                "cl_connected",
+                s=f"{snap.session_percent:.0f}",
+                w=f"{snap.week_percent:.0f}",
             )
         except httpx.HTTPStatusError as exc:
             code = exc.response.status_code
             if code == 401:
-                msg = (
-                    "Token OAuth wygasł lub jest nieprawidłowy (401)."
-                    if auth_type == "oauth"
-                    else "Nieprawidłowy klucz API (401)."
-                )
+                msg = tr("cl_oauth_401") if auth_type == "oauth" else tr("cl_key_401")
                 return False, msg
             if code == 429:
-                return True, "Połączono, ale limit chwilowo wyczerpany (429)."
-            return False, f"Błąd HTTP {code}."
+                return True, tr("cl_rate_limited")
+            return False, tr("cl_http_err", code=code)
         except Exception as exc:
-            return False, f"Błąd połączenia: {exc}"
+            return False, tr("cl_conn_err", exc=exc)
 
     # ------------------------------------------------------------------ #
     # Low-level pings
@@ -356,6 +363,20 @@ class MockGenerator:
 
     def snapshot_model(self) -> str:
         return constants.DEFAULT_MODEL
+
+    def token_usage(self) -> TokenUsage:
+        """Synthetic token usage so the TOKENS card is populated in demo mode."""
+        act = self.activity()
+        ti = self._prompts_today * 1800
+        to = self._prompts_today * 5200
+        tc = self._prompts_today * 240000
+        return TokenUsage(
+            totals=(ti + to + tc, (ti + to + tc) * 6, (ti + to + tc) * 22),
+            inputs=(ti, ti * 6, ti * 22),
+            outputs=(to, to * 6, to * 22),
+            cache=(tc, tc * 6, tc * 22),
+            hourly=act.hourly,
+        )
 
     def activity(self) -> ActivityData:
         """Build activity arrays consistent with the generated prompts."""

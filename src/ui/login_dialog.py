@@ -20,6 +20,7 @@ from PyQt6.QtWidgets import (
 
 from ..api import oauth
 from ..api.oauth_login import LoginSession
+from ..i18n import tr
 
 
 class LoginDialog(QDialog):
@@ -27,7 +28,7 @@ class LoginDialog(QDialog):
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
-        self.setWindowTitle("Zaloguj się przez Claude")
+        self.setWindowTitle(tr("login_title"))
         self.setModal(True)
         self.setMinimumWidth(480)
         self._session = LoginSession()
@@ -40,21 +41,16 @@ class LoginDialog(QDialog):
         root = QVBoxLayout(self)
         root.setSpacing(10)
 
-        info = QLabel(
-            "Otwarto stronę logowania Claude w przeglądarce.\n\n"
-            "1.  Zaloguj się na swoje konto Claude (Pro / Max) i zatwierdź dostęp.\n"
-            "2.  Skopiuj wyświetlony kod autoryzacyjny.\n"
-            "3.  Wklej go poniżej i kliknij „Zaloguj”."
-        )
+        info = QLabel(tr("login_steps"))
         info.setWordWrap(True)
         root.addWidget(info)
 
-        reopen = QPushButton("Otwórz ponownie stronę logowania")
+        reopen = QPushButton(tr("login_reopen"))
         reopen.clicked.connect(self._open_browser)
         root.addWidget(reopen)
 
         self.code = QLineEdit()
-        self.code.setPlaceholderText("Wklej tutaj kod autoryzacyjny…")
+        self.code.setPlaceholderText(tr("login_paste_ph"))
         self.code.returnPressed.connect(self._on_confirm)
         root.addWidget(self.code)
 
@@ -67,7 +63,7 @@ class LoginDialog(QDialog):
         cancel = QPushButton("Anuluj")
         cancel.clicked.connect(self.reject)
         buttons.addWidget(cancel)
-        self.confirm = QPushButton("Zaloguj")
+        self.confirm = QPushButton(tr("login_btn"))
         self.confirm.setObjectName("Primary")
         self.confirm.clicked.connect(self._on_confirm)
         buttons.addWidget(self.confirm)
@@ -76,24 +72,24 @@ class LoginDialog(QDialog):
     # ------------------------------------------------------------------ #
     def _open_browser(self) -> None:
         QDesktopServices.openUrl(QUrl(self._session.authorize_url()))
-        self._set_status("Otwarto przeglądarkę — zaloguj się i wklej kod.", "#94a3b8")
+        self._set_status(tr("login_opened"), "#94a3b8")
 
     def _on_confirm(self) -> None:
         code = self.code.text().strip()
         if not code:
-            self._set_status("Najpierw wklej kod autoryzacyjny.", "#ef4444")
+            self._set_status(tr("login_need_code"), "#ef4444")
             return
-        self._set_status("Łączenie z Claude…", "#94a3b8")
+        self._set_status(tr("login_connecting"), "#94a3b8")
         self.confirm.setEnabled(False)
         try:
             creds = self._session.exchange(code)
         except Exception as exc:
-            self._set_status(f"Logowanie nie powiodło się. {exc}", "#ef4444")
+            self._set_status(tr("login_failed", err=exc), "#ef4444")
             self.confirm.setEnabled(True)
             return
 
         oauth.save_login_credentials(creds)
-        self._set_status("Zalogowano pomyślnie.", "#22c55e")
+        self._set_status(tr("login_success"), "#22c55e")
         self.logged_in.emit(creds)
         self.accept()
 
