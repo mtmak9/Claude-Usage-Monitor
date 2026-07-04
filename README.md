@@ -8,7 +8,7 @@ No API key required: sign in once with your **Claude account (Pro / Max)** and
 the app reads your usage straight from the official endpoint.
 
 <p align="center">
-  <img src="assets/Screenshot.png" alt="Claude Usage Monitor overlay" width="270">
+  <img src="assets/overlay-preview.png" alt="Claude Usage Monitor overlay" width="270">
 </p>
 
 ![version](https://img.shields.io/badge/version-1.3.4-blueviolet)
