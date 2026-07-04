@@ -81,19 +81,21 @@ class OAuthCredentials:
         return (self.expires_at / 1000.0) <= (time.time() + skew_seconds)
 
     def plan_label(self) -> str:
-        """A human-friendly plan name derived from the tier / sub type."""
+        """A human-friendly plan name derived from the current subscription.
+
+        Claude's usage endpoint does not expose the exact Max multiplier
+        (5x/20x).  Local OAuth token metadata can keep an old ``rateLimitTier``
+        after a plan change, so the UI deliberately avoids showing that
+        multiplier as authoritative.
+        """
         tier = (self.rate_limit_tier or "").lower()
-        if "max_20" in tier:
-            return "Max 20x"
-        if "max_5" in tier:
-            return "Max 5x"
         if "max" in tier or (self.subscription_type or "").lower() == "max":
-            return "Max"
+            return "Claude Max"
         if "pro" in tier or (self.subscription_type or "").lower() == "pro":
-            return "Pro"
+            return "Claude Pro"
         if self.subscription_type:
-            return self.subscription_type.title()
-        return "Subskrypcja"
+            return f"Claude {self.subscription_type.title()}"
+        return "Claude Subscription"
 
 
 # --------------------------------------------------------------------------- #

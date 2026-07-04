@@ -125,6 +125,26 @@ def build_stylesheet() -> str:
         color: white;
     }}
 
+    /* Compact provider switch inside the model card. */
+    QPushButton#ProviderSwitch {{
+        background: {c.BG_TERTIARY};
+        border: 1px solid {c.BORDER_SUBTLE};
+        color: {c.TEXT_SECONDARY};
+        border-radius: 7px;
+        padding: 4px 8px;
+        font-size: 10px;
+        font-weight: 800;
+    }}
+    QPushButton#ProviderSwitch:hover {{
+        color: {c.TEXT_PRIMARY};
+        border-color: {c.BLUE};
+    }}
+    QPushButton#ProviderSwitch:checked {{
+        background: {c.with_alpha(c.BLUE, 0.22)};
+        border-color: {c.BLUE};
+        color: {c.TEXT_PRIMARY};
+    }}
+
     /* ---- Inputs ---- */
     QLineEdit, QComboBox, QSpinBox, QDoubleSpinBox {{
         background-color: {c.BG_TERTIARY};

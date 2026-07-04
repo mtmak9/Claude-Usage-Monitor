@@ -13,9 +13,10 @@ from pathlib import Path
 # --------------------------------------------------------------------------- #
 APP_NAME = "Claude Usage Monitor"
 APP_ID = "ClaudeMonitor"          # used for folders / registry / single-instance
-APP_VERSION = "1.1.1"
+APP_VERSION = "1.3.4"
 APP_AUTHOR = "Claude Usage Monitor"
 ORG_DOMAIN = "claude-monitor.local"
+SINGLE_INSTANCE_MUTEX_NAME = f"Local\\{APP_ID}.SingleInstance"
 
 # Author / project links (shown in the About dialog).
 APP_AUTHOR_NAME = "MTMAK9"
@@ -44,12 +45,17 @@ OAUTH_CACHE_PATH: Path = DATA_DIR / "oauth_cache.json"
 # when signed in via the standalone CLI).  The desktop app keeps an *encrypted*
 # copy instead — see src/api/oauth.py.
 CREDENTIALS_PATH: Path = Path.home() / ".claude" / ".credentials.json"
+CODEX_DIR: Path = Path.home() / ".codex"
+CODEX_AUTH_PATH: Path = CODEX_DIR / "auth.json"
+CODEX_SESSIONS_DIR: Path = CODEX_DIR / "sessions"
 
 # Project-relative resources
 PROJECT_ROOT: Path = Path(__file__).resolve().parent.parent
 ASSETS_DIR: Path = PROJECT_ROOT / "assets"
 CONFIG_DIR: Path = PROJECT_ROOT / "config"
 DEFAULT_CONFIG_PATH: Path = CONFIG_DIR / "default.toml"
+LIMIT_HIT_SOUND_PATH: Path = ASSETS_DIR / "limit_hit.wav"
+SESSION_RENEWED_SOUND_PATH: Path = ASSETS_DIR / "session_renewed.wav"
 
 # --------------------------------------------------------------------------- #
 # Anthropic API
@@ -86,6 +92,7 @@ KEYRING_USERNAME = "default"
 
 # Known models -> display metadata.  Keyed by a stable id prefix.
 MODELS = {
+    "codex":              {"label": "Codex",      "short": "Codex",  "tier": "codex"},
     "claude-opus-4-8":   {"label": "Opus 4.8",   "short": "Opus",   "tier": "opus"},
     "claude-opus-4-7":   {"label": "Opus 4.7",   "short": "Opus",   "tier": "opus"},
     "claude-opus-4-6":   {"label": "Opus 4.6",   "short": "Opus",   "tier": "opus"},
@@ -157,6 +164,7 @@ WINDOW_MARGIN = 18
 # --------------------------------------------------------------------------- #
 DEFAULT_CONFIG: dict = {
     "auth": {
+        "provider": "claude",       # one of: claude | codex
         # Default to OAuth: subscription users get real 5h/7d utilisation from
         # the locally discovered Claude token with no API key required.
         "auth_type": "oauth",       # one of: oauth | api_key | mock

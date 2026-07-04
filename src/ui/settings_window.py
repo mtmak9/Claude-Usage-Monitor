@@ -65,6 +65,12 @@ class SettingsWindow(QDialog):
         box = QGroupBox(tr("grp_auth"))
         form = QFormLayout(box)
 
+        self.provider = QComboBox()
+        self.provider.addItem(tr("provider_claude"), "claude")
+        self.provider.addItem(tr("provider_codex"), "codex")
+        self.provider.currentIndexChanged.connect(self._on_provider_changed)
+        form.addRow(tr("provider"), self.provider)
+
         self.auth_type = QComboBox()
         # OAuth first — the recommended default for Pro/Max subscribers.
         self.auth_type.addItem(tr("auth_oauth"), "oauth")
@@ -77,7 +83,7 @@ class SettingsWindow(QDialog):
         self.oauth_info = QLabel("")
         self.oauth_info.setWordWrap(True)
         self.oauth_info.setStyleSheet("color: #94a3b8; font-size: 11px;")
-        form.addRow(tr("lbl_oauth_token"), self.oauth_info)
+        form.addRow(tr("lbl_status"), self.oauth_info)
 
         # Account authorisation — anyone can log in to their own Claude account.
         login_row = QHBoxLayout()
@@ -109,6 +115,8 @@ class SettingsWindow(QDialog):
 
         self.model = QComboBox()
         for model_id, meta in constants.MODELS.items():
+            if model_id == "codex":
+                continue
             self.model.addItem(meta["label"], model_id)
         form.addRow(tr("lbl_model_ping"), self.model)
 
@@ -184,6 +192,9 @@ class SettingsWindow(QDialog):
     # ------------------------------------------------------------------ #
     def _on_auth_changed(self, *_args) -> None:
         """Toggle the API-key field and refresh OAuth status when the mode changes."""
+        if getattr(self, "provider", None) is not None and self.provider.currentData() == "codex":
+            self._on_provider_changed()
+            return
         mode = self.auth_type.currentData()
         is_api = mode == "api_key"
         self.api_key.setEnabled(is_api)
@@ -193,6 +204,18 @@ class SettingsWindow(QDialog):
         self.login_btn.setEnabled(is_oauth)
         self.logout_btn.setEnabled(is_oauth and oauth.has_local_login())
         self._refresh_oauth_info()
+
+    def _on_provider_changed(self, *_args) -> None:
+        """Switch between Claude auth controls and local Codex status."""
+        is_codex = self.provider.currentData() == "codex"
+        for widget in (self.auth_type, self.login_btn, self.logout_btn, self.model):
+            widget.setEnabled(not is_codex)
+        if is_codex:
+            for widget in (self.api_key, self.api_key_label, self.show_key):
+                widget.setEnabled(False)
+            self._refresh_oauth_info()
+            return
+        self._on_auth_changed()
 
     # -- account login / logout ----------------------------------------- #
     def _on_login(self) -> None:
@@ -204,7 +227,9 @@ class SettingsWindow(QDialog):
 
     def _on_logged_in(self, _creds) -> None:
         # A fresh login means OAuth — switch to it, persist, and re-poll now.
+        self.provider.setCurrentIndex(max(0, self.provider.findData("claude")))
         self.auth_type.setCurrentIndex(max(0, self.auth_type.findData("oauth")))
+        self.config.set("auth.provider", "claude")
         self.config.set("auth.auth_type", "oauth")
         self.config.save()
         self.logout_btn.setEnabled(True)
@@ -219,6 +244,16 @@ class SettingsWindow(QDialog):
 
     def _refresh_oauth_info(self) -> None:
         """Show which local OAuth credential was discovered (best-effort)."""
+        if getattr(self, "provider", None) is not None and self.provider.currentData() == "codex":
+            ok, msg = self.client.test_connection(provider="codex")
+            self.oauth_info.setText(msg if ok else tr("codex_not_found"))
+            self.oauth_info.setStyleSheet(
+                "color: #22c55e; font-size: 11px;"
+                if ok
+                else "color: #ef4444; font-size: 11px;"
+            )
+            return
+
         try:
             creds = oauth.load_credentials()
         except Exception:
@@ -240,12 +275,15 @@ class SettingsWindow(QDialog):
             self.oauth_info.setStyleSheet("color: #ef4444; font-size: 11px;")
 
     def _load_values(self) -> None:
+        pidx = max(0, self.provider.findData(self.config.provider))
+        self.provider.setCurrentIndex(pidx)
+
         idx = max(0, self.auth_type.findData(self.config.auth_type))
         self.auth_type.setCurrentIndex(idx)
 
         stored = encryption.load_api_key() or self.config.get("auth.api_key", "")
         self.api_key.setText(stored or "")
-        self._on_auth_changed()
+        self._on_provider_changed()
 
         midx = max(0, self.model.findData(self.config.model))
         self.model.setCurrentIndex(midx)
@@ -272,8 +310,13 @@ class SettingsWindow(QDialog):
         self.test_result.setStyleSheet("color: #94a3b8;")
         # Stash the typed key so the client can read it during the test.
         auth = self.auth_type.currentData()
+        provider = self.provider.currentData()
         key = self.api_key.text().strip()
-        ok, message = self.client.test_connection(api_key=key, auth_type=auth)
+        ok, message = self.client.test_connection(
+            api_key=key,
+            auth_type=auth,
+            provider=provider,
+        )
         self.test_result.setText(message)
         self.test_result.setStyleSheet(
             "color: #22c55e;" if ok else "color: #ef4444;"
@@ -281,6 +324,7 @@ class SettingsWindow(QDialog):
 
     def _on_save(self) -> None:
         old_language = self.config.language
+        self.config.set("auth.provider", self.provider.currentData())
         self.config.set("auth.auth_type", self.auth_type.currentData())
         self.config.set("auth.model", self.model.currentData())
 

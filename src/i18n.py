@@ -66,7 +66,11 @@ _STRINGS: dict[str, tuple[str, str]] = {
     "tokens_today": ("tokenów dziś (Claude Code)", "tokens today (Claude Code)"),
     "tokens_week": ("tokenów / 7 dni (Claude Code)", "tokens / 7 days (Claude Code)"),
     "tokens_month": ("tokenów / 30 dni (Claude Code)", "tokens / 30 days (Claude Code)"),
+    "tokens_codex_today": ("wygenerowanych tokenów dziś (Codex)", "generated tokens today (Codex)"),
+    "tokens_codex_week": ("wygenerowanych tokenów / 7 dni (Codex)", "generated tokens / 7 days (Codex)"),
+    "tokens_codex_month": ("wygenerowanych tokenów / 30 dni (Codex)", "generated tokens / 30 days (Codex)"),
     "tokens_breakdown": ("wej {i} · wyj {o} · cache {c}", "in {i} · out {o} · cache {c}"),
+    "tokens_codex_breakdown": ("kontekst {i} · gen {o} · cache {c}", "context {i} · gen {o} · cache {c}"),
 
     # -- overlay cards --------------------------------------------------- #
     "card_prompts": ("PROMPTY", "PROMPTS"),
@@ -128,14 +132,30 @@ _STRINGS: dict[str, tuple[str, str]] = {
         "{label}: wykorzystano {pct}% (próg {th}%)",
         "{label}: {pct}% used (threshold {th}%)",
     ),
+    "notify_session_90": (
+        "{ai}: sesja 5h przekroczyła 90% ({pct}%).",
+        "{ai}: 5h session exceeded 90% ({pct}%).",
+    ),
+    "notify_session_full": (
+        "{ai}: sesja 5h osiągnęła 100%.",
+        "{ai}: 5h session reached 100%.",
+    ),
+    "notify_session_renewed": (
+        "{ai}: sesja 5h odnowiona. Aktualnie {pct}%.",
+        "{ai}: 5h session renewed. Currently {pct}%.",
+    ),
 
     # -- settings -------------------------------------------------------- #
     "settings_title": ("Ustawienia — Claude Usage Monitor", "Settings — Claude Usage Monitor"),
+    "provider": ("Provider:", "Provider:"),
+    "provider_claude": ("Claude", "Claude"),
+    "provider_codex": ("Codex", "Codex"),
     "grp_auth": ("Autoryzacja", "Authorization"),
     "auth_type": ("Typ:", "Type:"),
     "auth_oauth": ("OAuth — subskrypcja (zalecane)", "OAuth — subscription (recommended)"),
     "auth_api_key": ("Klucz API", "API key"),
     "auth_demo": ("Tryb demo (bez klucza)", "Demo mode (no key)"),
+    "lbl_status": ("Status:", "Status:"),
     "lbl_oauth_token": ("Token OAuth:", "OAuth token:"),
     "lbl_account": ("Konto:", "Account:"),
     "btn_login": ("Zaloguj się przez Claude", "Sign in with Claude"),
@@ -175,6 +195,14 @@ _STRINGS: dict[str, tuple[str, str]] = {
     "oauth_not_found": (
         "✗ Nie znaleziono lokalnego tokenu. Zaloguj się w Claude Code / aplikacji Claude.",
         "✗ No local token found. Sign in via Claude Code / the Claude app.",
+    ),
+    "codex_detected": (
+        "✓ Wykryto lokalne sesje Codex ({plan})",
+        "✓ Detected local Codex sessions ({plan})",
+    ),
+    "codex_not_found": (
+        "✗ Nie znaleziono lokalnych sesji Codex. Uruchom Codex i zaloguj się przez ChatGPT.",
+        "✗ No local Codex sessions found. Start Codex and sign in with ChatGPT.",
     ),
     "lang_restart_title": ("Zmiana języka", "Language change"),
     "lang_restart_body": (
@@ -250,6 +278,14 @@ _STRINGS: dict[str, tuple[str, str]] = {
     ),
     "cl_no_key": ("Nie podano klucza API.", "No API key provided."),
     "cl_connected": ("Połączono. Sesja {s}% / Tydzień {w}%", "Connected. Session {s}% / Week {w}%"),
+    "codex_connected": (
+        "Połączono z Codex ({plan}). Sesja {s}% / Tydzień {w}%",
+        "Connected to Codex ({plan}). Session {s}% / Week {w}%",
+    ),
+    "codex_no_data": (
+        "Nie znaleziono danych limitów Codex w lokalnych sesjach.",
+        "No Codex rate-limit data found in local sessions.",
+    ),
     "cl_oauth_401": ("Token OAuth wygasł lub jest nieprawidłowy (401).", "OAuth token expired or invalid (401)."),
     "cl_key_401": ("Nieprawidłowy klucz API (401).", "Invalid API key (401)."),
     "cl_rate_limited": ("Połączono, ale limit chwilowo wyczerpany (429).", "Connected, but rate-limited for now (429)."),

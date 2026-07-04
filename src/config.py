@@ -74,7 +74,7 @@ class Config:
         if not path.exists():
             return
         try:
-            with open(path, "r", encoding="utf-8") as fh:
+            with open(path, "r", encoding="utf-8-sig") as fh:
                 user = json.load(fh)
             self._data = _deep_merge(self._data, user)
         except Exception as exc:
@@ -117,6 +117,11 @@ class Config:
     # ------------------------------------------------------------------ #
     # Typed convenience accessors
     # ------------------------------------------------------------------ #
+    @property
+    def provider(self) -> str:
+        value = str(self.get("auth.provider", "claude")).lower()
+        return value if value in {"claude", "codex"} else "claude"
+
     @property
     def auth_type(self) -> str:
         # OAuth is the default for subscription users (see config/default.toml).

@@ -4,6 +4,9 @@
 # %APPDATA%/ClaudeMonitor/config.json and take precedence over these values.
 
 [auth]
+# provider:   "claude" -> Anthropic Claude subscription/API monitoring
+#             "codex"  -> OpenAI Codex local usage/rate-limit monitoring
+provider = "claude"
 # auth_type:  "oauth"   -> reads the local Claude subscription OAuth token and
 #                          calls /api/oauth/usage for real 5h/7d utilisation
 #                          (no API key needed — recommended for Pro/Max users)

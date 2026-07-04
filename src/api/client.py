@@ -1,6 +1,6 @@
-"""Anthropic API client.
+"""Usage-provider client.
 
-Three modes are supported:
+Claude modes:
 
 * ``oauth``   — the default for subscription users.  Reads the local Claude
                 OAuth token and calls ``GET /api/oauth/usage`` with an
@@ -11,6 +11,9 @@ Three modes are supported:
                 the ``anthropic-ratelimit-*`` response headers.
 * ``mock``    — no network at all; generates lively demo data so the whole UI
                 can be exercised without credentials.
+
+Codex mode reads local ``~/.codex/sessions`` JSONL files for rate limits and
+token usage. It does not require an OpenAI API key.
 
 Every failure path returns a snapshot carrying an ``error`` string rather than
 raising, so the poller/UI never crash on a bad network or token.
@@ -31,6 +34,7 @@ from .headers import parse_rate_limit_headers
 from .models import ActivityData, UsageSnapshot
 from .oauth import load_credentials
 from .usage import parse_oauth_usage
+from ..storage.codex_usage import CodexUsageReader
 from ..storage.token_usage import TokenUsage, TokenUsageReader
 
 log = logging.getLogger(__name__)
@@ -50,6 +54,7 @@ class AnthropicClient:
         self._mock = MockGenerator()
         self._last_oauth_good: Optional[UsageSnapshot] = None
         self._token_reader = TokenUsageReader()
+        self._codex_reader = CodexUsageReader()
 
     # ------------------------------------------------------------------ #
     # Credentials
@@ -66,8 +71,17 @@ class AnthropicClient:
             pass
         return self.config.get("auth.api_key") or None
 
-    def effective_auth(self) -> str:
+    def effective_auth(self, provider: Optional[str] = None) -> str:
         """Resolve the auth mode actually usable right now."""
+        provider = provider or self.config.provider
+        if provider == "codex":
+            return "codex"
+        return self.effective_auth_for_provider("claude")
+
+    def effective_auth_for_provider(self, provider: str) -> str:
+        """Resolve the auth mode for an explicit provider."""
+        if provider == "codex":
+            return "codex"
         configured = self.config.auth_type
         if configured == "mock":
             return "mock"
@@ -80,8 +94,12 @@ class AnthropicClient:
     # ------------------------------------------------------------------ #
     # Public API
     # ------------------------------------------------------------------ #
-    def fetch_snapshot(self) -> UsageSnapshot:
-        mode = self.effective_auth()
+    def fetch_snapshot(self, provider: Optional[str] = None) -> UsageSnapshot:
+        provider = provider or self.config.provider
+        if provider == "codex":
+            return self._codex_snapshot()
+
+        mode = self.effective_auth(provider)
         if mode == "mock":
             snap = self._mock.snapshot()
             snap.is_peak = peak_hours.is_peak()
@@ -160,6 +178,31 @@ class AnthropicClient:
         self._last_oauth_good = snap
         return snap
 
+    # ------------------------------------------------------------------ #
+    # Codex local-usage path
+    # ------------------------------------------------------------------ #
+    def _codex_snapshot(self) -> UsageSnapshot:
+        limits = self._codex_reader.latest_limits()
+        if limits is None:
+            return UsageSnapshot(error=tr("codex_no_data"), model="codex")
+
+        snap = UsageSnapshot(
+            timestamp=datetime.now(timezone.utc),
+            model="codex",
+            session_utilization=limits.session_percent,
+            week_utilization=limits.week_percent,
+            session_reset=limits.session_reset,
+            week_reset=limits.week_reset,
+            # Keep the subscription gauge consistent with Claude: it represents
+            # the rolling weekly subscription limit, not the 5h session window.
+            subscription_percent=limits.week_percent,
+            plan_name=limits.plan_label,
+            cycle_label=limits.plan_label,
+            cycle_renews=limits.week_reset,
+            is_peak=False,
+        )
+        return snap
+
     def _stale_snapshot(self) -> Optional[UsageSnapshot]:
         """A copy of the last good OAuth reading, flagged stale (or None)."""
         if self._last_oauth_good is None:
@@ -189,18 +232,38 @@ class AnthropicClient:
         """Activity arrays for the mock mode (real mode uses the DB history)."""
         return self._mock.activity()
 
-    def token_usage(self) -> TokenUsage:
-        """Token usage from the local Claude Code logs (or demo numbers in mock)."""
-        if self.effective_auth() == "mock":
-            return self._mock.token_usage()
-        return self._token_reader.read()
+    def token_usage(self, provider: Optional[str] = None) -> TokenUsage:
+        """Token usage from the active provider's local logs (or demo numbers)."""
+        provider = provider or self.config.provider
+        if provider == "codex":
+            return self._codex_reader.token_usage()
+        if self.effective_auth(provider) == "mock":
+            return self._mock.token_usage(provider="claude")
+        usage = self._token_reader.read()
+        usage.provider = "claude"
+        return usage
 
     # ------------------------------------------------------------------ #
     # Connection test (used by the Settings dialog)
     # ------------------------------------------------------------------ #
     def test_connection(
-        self, api_key: Optional[str] = None, auth_type: Optional[str] = None
+        self,
+        api_key: Optional[str] = None,
+        auth_type: Optional[str] = None,
+        provider: Optional[str] = None,
     ) -> Tuple[bool, str]:
+        provider = provider or self.config.provider
+        if provider == "codex":
+            limits = self._codex_reader.latest_limits()
+            if not limits:
+                return False, tr("codex_no_data")
+            return True, tr(
+                "codex_connected",
+                plan=limits.plan_label,
+                s=f"{limits.session_percent:.0f}",
+                w=f"{limits.week_percent:.0f}",
+            )
+
         auth_type = auth_type or self.config.auth_type
         if auth_type == "mock":
             return True, tr("cl_mock_ok")
@@ -364,13 +427,14 @@ class MockGenerator:
     def snapshot_model(self) -> str:
         return constants.DEFAULT_MODEL
 
-    def token_usage(self) -> TokenUsage:
+    def token_usage(self, provider: str = "claude") -> TokenUsage:
         """Synthetic token usage so the TOKENS card is populated in demo mode."""
         act = self.activity()
         ti = self._prompts_today * 1800
         to = self._prompts_today * 5200
         tc = self._prompts_today * 240000
         return TokenUsage(
+            provider=provider,
             totals=(ti + to + tc, (ti + to + tc) * 6, (ti + to + tc) * 22),
             inputs=(ti, ti * 6, ti * 22),
             outputs=(to, to * 6, to * 22),

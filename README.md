@@ -8,9 +8,10 @@ No API key required: sign in once with your **Claude account (Pro / Max)** and
 the app reads your usage straight from the official endpoint.
 
 <p align="center">
-  <img src="assets/screenshot.png" alt="Claude Usage Monitor overlay" width="270">
+  <img src="assets/Screenshot.png" alt="Claude Usage Monitor overlay" width="270">
 </p>
 
+![version](https://img.shields.io/badge/version-1.3.4-blueviolet)
 ![platform](https://img.shields.io/badge/platform-Windows-blue)
 ![python](https://img.shields.io/badge/python-3.10%2B-green)
 ![license](https://img.shields.io/badge/license-MIT-orange)
@@ -21,18 +22,73 @@ the app reads your usage straight from the official endpoint.
 
 - 🔐 **Sign in with your Claude account** (OAuth, PKCE) — one click, no API key
 - 📊 Live **5h session** and **7d weekly** utilisation with reset countdowns
+- 🔁 **Claude / Codex panel switch** directly on the overlay, with model status dots
 - 🧮 **Usage credits ($)** card — spent / monthly limit / balance
 - 🟢 **Tray icon** that changes colour (green → yellow → orange → red) with usage
 - 🪟 **Floating overlay** — frameless, translucent, always‑on‑top, drag anywhere
 - 🟣 Subscription gauge, **Peak hours** (US Pacific) and an **Activity** heat‑bar
-- 🔔 Threshold notifications at **80 % / 90 % / 100 %** (toast → tray balloon)
+- 🔔 Tray notifications for **90 % / 100 % session usage** and weekly thresholds
+- 🔊 Dedicated sounds for 100 % limit hits and session renewals
+- 🧷 **Single instance** — launching the app twice reuses the running instance
 - 💾 **SQLite history** with a charts window (daily prompts + 24h trend)
 - 🚀 Optional **auto‑start** with Windows
 - 🧪 **Demo mode** — the whole UI runs on realistic synthetic data, no account
 
+### Codex mode
+
+The app can also switch to **Codex** from the overlay’s Claude/Codex model pills
+or in **Settings → Authorization → Provider**. Codex mode reads local Codex
+session logs from `%USERPROFILE%\.codex\sessions` and shows real Codex **5h / 7d
+rate-limit utilisation**, reset times and generated-token activity. No OpenAI API
+key is required; you only need to be signed in to Codex with ChatGPT on the same
+Windows account.
+
+For Codex, the large token counter shows **generated tokens**. The breakdown also
+shows context/cache, but the headline avoids counting the repeated full working
+context that Codex sends on each model turn.
+
+## What's new in v1.3.4
+
+- Added a separate `limit_hit.wav` sound for 100% session limit hits.
+- Kept `session_renewed.wav` as a distinct renewal chime, so hit and reset events are easy to tell apart.
+
+## What's new in v1.3.3
+
+- Fixed repeated renewal chimes when Claude remains at 100% after the reset timestamp moves.
+- Session-full notifications now fire once at 100%; the renewal sound only plays after the session actually drops below full usage.
+- Notification delivery now falls back to native Windows toast when tray message balloons are unavailable.
+
+## What's new in v1.3.2
+
+- Claude and Codex now refresh in parallel even when only one provider is open in the detailed monitor.
+- Inactive provider updates now refresh only its status pill, without switching or overwriting the active panel.
+- Provider polling uses separate cooldowns, so Claude OAuth keeps its rate-limit-safe cadence while Codex local logs can refresh normally.
+
+## What's new in v1.3.1
+
+- Fixed Codex subscription gauge so it always tracks the weekly 7d limit, not the 5h session limit.
+- Fixed stale Codex session windows: expired local 5h records no longer keep the UI pinned at 100%.
+- Changed the overlay switch labels to provider names (`Claude` / `Codex`) instead of model names.
+
+## What's new in v1.3.0
+
+- Added Claude/Codex multi-provider monitoring with an overlay panel switch.
+- Fixed provider mixing so Claude and Codex token counters cannot overwrite each other.
+- Changed Codex token headline to generated tokens for a more useful reading.
+- Added session notifications at 90 % and 100 %, plus a dedicated renewal chime.
+- Added single-instance protection so only one app copy can run at once.
+- Updated the build to include the dedicated WAV sound asset in the one-file exe.
+
 ## How it gets your usage
 
 Pick an auth mode in **Settings → Authorization**:
+
+First choose the **Provider**:
+
+| Provider | What it shows | Data source |
+|----------|---------------|-------------|
+| **Claude** | Claude subscription/API usage, credits and peak-hours context | Claude OAuth endpoint or API-key headers |
+| **Codex** | Codex 5h/7d rate limits and local token activity | local `%USERPROFILE%\.codex\sessions` JSONL logs |
 
 | Mode | What it does | Needs |
 |------|--------------|-------|
@@ -56,7 +112,9 @@ pip install -r requirements.txt
 python -m src.main
 ```
 
-The widget appears top‑right and a circular icon appears in your tray.
+The widget appears top‑right and a circular icon appears in your tray. Only one
+copy of the app can run at once; launching it again will bring the existing
+widget forward when Windows exposes the window handle.
 **Left‑click** the tray icon to show/hide the widget, **right‑click** for the menu.
 
 ## Signing in
@@ -129,6 +187,7 @@ src/
   utils/             notifications, autostart, keyring, peak hours
 config/default.toml  shipped defaults
 assets/              icon generator + screenshot
+                     limit-hit / renewal WAVs + sound generator
 ```
 
 ## Requirements
@@ -138,6 +197,11 @@ assets/              icon generator + screenshot
   - `cryptography` — only needed to auto‑detect the **Claude desktop app’s**
     encrypted token; the in‑app login and the CLI’s plaintext token work without it.
   - `win10toast` — richer toasts; falls back to tray balloons.
+
+The dedicated alert sounds are bundled as
+[`assets/limit_hit.wav`](assets/limit_hit.wav) and
+[`assets/session_renewed.wav`](assets/session_renewed.wav). They can be
+regenerated with `python assets/generate_sounds.py`.
 
 ## Troubleshooting
 
@@ -150,6 +214,8 @@ assets/              icon generator + screenshot
   the values are `null`. This is an API limitation, not a bug.
 - **No tray icon** — re‑enable “Show all icons” in taskbar settings; the overlay
   still runs.
+- **Double-clicking the app does nothing** — another instance is already running;
+  use the tray icon or the existing widget.
 - **`ModuleNotFoundError: PyQt6`** — activate your venv and re‑run
   `pip install -r requirements.txt`.
 - **Peak hours look off** — ensure `tzdata` is installed (it’s in requirements).

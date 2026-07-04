@@ -37,6 +37,9 @@ from .ui.tray import Tray
 from .utils.notifications import NotificationManager
 
 
+_SINGLE_INSTANCE_HANDLE = None
+
+
 def _setup_logging() -> None:
     constants.DATA_DIR.mkdir(parents=True, exist_ok=True)
     logging.basicConfig(
@@ -61,6 +64,54 @@ def _set_app_user_model_id() -> None:
         pass
 
 
+def _activate_existing_instance() -> None:
+    """Best-effort: bring the already running overlay back when launched again."""
+    try:
+        import ctypes
+        from ctypes import wintypes
+
+        user32 = ctypes.WinDLL("user32", use_last_error=True)
+        user32.FindWindowW.argtypes = (wintypes.LPCWSTR, wintypes.LPCWSTR)
+        user32.FindWindowW.restype = wintypes.HWND
+        user32.ShowWindow.argtypes = (wintypes.HWND, ctypes.c_int)
+        user32.ShowWindow.restype = wintypes.BOOL
+        user32.SetForegroundWindow.argtypes = (wintypes.HWND,)
+        user32.SetForegroundWindow.restype = wintypes.BOOL
+        hwnd = user32.FindWindowW(None, constants.APP_NAME)
+        if hwnd:
+            user32.ShowWindow(hwnd, 5)  # SW_SHOW
+            user32.SetForegroundWindow(hwnd)
+    except Exception:
+        pass
+
+
+def _claim_single_instance() -> bool:
+    """Return False when another app instance already owns the Windows mutex."""
+    global _SINGLE_INSTANCE_HANDLE
+    try:
+        import ctypes
+        from ctypes import wintypes
+
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        kernel32.CreateMutexW.argtypes = (wintypes.LPVOID, wintypes.BOOL, wintypes.LPCWSTR)
+        kernel32.CreateMutexW.restype = wintypes.HANDLE
+        kernel32.CloseHandle.argtypes = (wintypes.HANDLE,)
+        kernel32.CloseHandle.restype = wintypes.BOOL
+
+        handle = kernel32.CreateMutexW(None, False, constants.SINGLE_INSTANCE_MUTEX_NAME)
+        if not handle:
+            return True
+        if ctypes.get_last_error() == 183:  # ERROR_ALREADY_EXISTS
+            kernel32.CloseHandle(handle)
+            _activate_existing_instance()
+            return False
+        _SINGLE_INSTANCE_HANDLE = handle
+        return True
+    except Exception:
+        # If the platform API is unavailable, prefer starting over blocking the app.
+        return True
+
+
 class MonitorApp:
     """Top-level controller owning every long-lived object."""
 
@@ -78,6 +129,8 @@ class MonitorApp:
         self.notifications = NotificationManager(self.config)
         self._settings_win: SettingsWindow | None = None
         self._history_win: HistoryWindow | None = None
+        self._latest_snapshots: dict[str, UsageSnapshot] = {}
+        self._latest_tokens: dict[str, object] = {}
 
         tray_available = self._init_tray()
         self._connect()
@@ -102,14 +155,15 @@ class MonitorApp:
 
     def _connect(self) -> None:
         self.poller.snapshot_ready.connect(self._on_snapshot)
-        self.poller.tokens_ready.connect(self.overlay.update_tokens)
+        self.poller.tokens_ready.connect(self._on_tokens)
         self.poller.error.connect(lambda e: logging.error("poll error: %s", e))
         self.overlay.request_menu.connect(self._show_context_menu)
+        self.overlay.provider_changed.connect(self._on_provider_changed)
 
         if self.tray is not None:
             self.tray.toggle_overlay.connect(self._toggle_overlay)
             self.tray.toggle_compact.connect(self.overlay.toggle_compact)
-            self.tray.refresh_now.connect(self.poller.poll_now)
+            self.tray.refresh_now.connect(lambda: self.poller.poll_now(force=True))
             self.tray.open_history.connect(self._open_history)
             self.tray.open_settings.connect(self._open_settings)
             self.tray.open_about.connect(self._open_about)
@@ -125,22 +179,41 @@ class MonitorApp:
     # ------------------------------------------------------------------ #
     # Data flow
     # ------------------------------------------------------------------ #
-    def _on_snapshot(self, snap: UsageSnapshot) -> None:
+    def _on_snapshot(self, provider: str, snap: UsageSnapshot) -> None:
         # Stale snapshots are the last good reading re-shown after a rate-limit
         # (429); display them but don't persist duplicates or re-notify.
         fresh = isinstance(snap, UsageSnapshot) and snap.ok and not snap.is_stale
-        if fresh:
+        active = provider == self.config.provider
+        if isinstance(snap, UsageSnapshot):
+            self._latest_snapshots[provider] = snap
+
+        # The history database is not provider-aware yet, so only persist the
+        # provider currently shown in the detailed panel.
+        if fresh and active:
             self.db.insert_snapshot(snap)
 
-        self.overlay.update_snapshot(snap)
-        if self.tray is not None:
+        if active:
+            self.overlay.update_snapshot(snap)
+        else:
+            self.overlay.update_provider_status(snap)
+
+        if self.tray is not None and active:
             self.tray.update_state(snap)
 
         if fresh:
-            self.notifications.check_usage(snap.session_percent, tr("notify_session"))
-            self.notifications.check_usage(snap.week_percent, tr("notify_week"))
+            self.notifications.check_session(snap)
+            self.notifications.check_usage(
+                snap.week_percent,
+                tr("notify_week"),
+                key=f"{provider}:week",
+            )
         # Token usage (and the hourly activity chart) arrive separately via the
         # poller's tokens_ready signal → overlay.update_tokens.
+
+    def _on_tokens(self, provider: str, tokens: object) -> None:
+        self._latest_tokens[provider] = tokens
+        if provider == self.config.provider:
+            self.overlay.update_tokens(tokens)
 
     # ------------------------------------------------------------------ #
     # UI actions
@@ -169,9 +242,28 @@ class MonitorApp:
     def _apply_settings(self) -> None:
         self.overlay.apply_opacity(self.config.opacity)
         self.overlay.apply_always_on_top(self.config.always_on_top)
+        self.overlay.sync_provider_switch(self.config.provider)
         self.overlay.set_compact(self.config.compact, persist=False)
         self.poller.set_interval_seconds(self.config.poll_interval)
-        self.poller.poll_now()  # reflect new auth / model immediately
+        if self.config.provider in self._latest_snapshots:
+            self.overlay.update_snapshot(self._latest_snapshots[self.config.provider])
+        if self.config.provider in self._latest_tokens:
+            self.overlay.update_tokens(self._latest_tokens[self.config.provider])
+        self.poller.poll_now(force=True)  # reflect new auth / model immediately
+
+    def _on_provider_changed(self, provider: str) -> None:
+        logging.info("provider switched to %s", provider)
+        if self._settings_win is not None:
+            idx = self._settings_win.provider.findData(provider)
+            if idx >= 0:
+                self._settings_win.provider.setCurrentIndex(idx)
+        if provider in self._latest_snapshots:
+            self.overlay.update_snapshot(self._latest_snapshots[provider])
+            if self.tray is not None:
+                self.tray.update_state(self._latest_snapshots[provider])
+        if provider in self._latest_tokens:
+            self.overlay.update_tokens(self._latest_tokens[provider])
+        self.poller.poll_now(force=True)
 
     def _open_history(self) -> None:
         if self._history_win is None:
@@ -238,6 +330,9 @@ class MonitorApp:
 
 def main() -> int:
     _setup_logging()
+    if not _claim_single_instance():
+        logging.info("%s is already running; exiting duplicate instance.", constants.APP_NAME)
+        return 0
     _set_app_user_model_id()
 
     app = QApplication([])

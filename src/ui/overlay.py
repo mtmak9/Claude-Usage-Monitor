@@ -20,6 +20,7 @@ from PyQt6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QPushButton,
+    QSizePolicy,
     QVBoxLayout,
     QWidget,
 )
@@ -30,13 +31,17 @@ from ..i18n import tr
 from ..storage.token_usage import TokenUsage
 from .components.activity_chart import ActivityChart
 from .components.circular_gauge import CircularGauge
-from .components.model_badge import ModelBadge
 from .components.peak_indicator import PeakIndicator
 from .components.progress_bar import GradientProgressBar
 from .styles.colors import Colors
 
 _TAB_KEYS = ("tab_today", "tab_week", "tab_month")
 _TOKEN_CAPTION_KEYS = ("tokens_today", "tokens_week", "tokens_month")
+_CODEX_TOKEN_CAPTION_KEYS = (
+    "tokens_codex_today",
+    "tokens_codex_week",
+    "tokens_codex_month",
+)
 
 
 def _fmt_tokens(n: int) -> str:
@@ -55,8 +60,103 @@ def _strip_in(text: str) -> str:
     return text
 
 
+class _ProviderPill(QFrame):
+    """Clickable provider status pill used as the Claude/Codex panel switch."""
+
+    clicked = pyqtSignal(str)
+
+    def __init__(self, provider: str, title: str, parent=None) -> None:
+        super().__init__(parent)
+        self.provider = provider
+        self._selected = False
+        self._hover = False
+        self.setObjectName("ProviderPill")
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setMinimumHeight(38)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(9, 6, 9, 6)
+        layout.setSpacing(6)
+
+        self._dot = QLabel("●")
+        self._dot.setFixedWidth(12)
+        self._dot.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(self._dot, 0, Qt.AlignmentFlag.AlignVCenter)
+
+        col = QVBoxLayout()
+        col.setContentsMargins(0, 0, 0, 0)
+        col.setSpacing(0)
+
+        self._title = QLabel(title)
+        self._title.setFont(QFont("Segoe UI", 10, QFont.Weight.DemiBold))
+        self._title.setTextFormat(Qt.TextFormat.PlainText)
+        col.addWidget(self._title)
+
+        self._usage = QLabel("—")
+        self._usage.setFont(QFont("Segoe UI", 8, QFont.Weight.DemiBold))
+        self._usage.setTextFormat(Qt.TextFormat.PlainText)
+        col.addWidget(self._usage)
+
+        layout.addLayout(col, 1)
+        self.set_status(Colors.TEXT_MUTED, "—")
+        self.set_selected(False)
+
+    def set_title(self, text: str) -> None:
+        self._title.setText(text)
+
+    def set_status(self, color: str, usage: str | None = None) -> None:
+        self._dot.setStyleSheet(f"color: {color}; font-size: 12px;")
+        if usage is not None:
+            self._usage.setText(usage)
+
+    def set_selected(self, selected: bool) -> None:
+        self._selected = selected
+        self._refresh_style()
+
+    def enterEvent(self, event) -> None:  # noqa: N802
+        self._hover = True
+        self._refresh_style()
+        super().enterEvent(event)
+
+    def leaveEvent(self, event) -> None:  # noqa: N802
+        self._hover = False
+        self._refresh_style()
+        super().leaveEvent(event)
+
+    def mousePressEvent(self, event) -> None:  # noqa: N802
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.clicked.emit(self.provider)
+            event.accept()
+            return
+        super().mousePressEvent(event)
+
+    def _refresh_style(self) -> None:
+        bg = Colors.with_alpha(Colors.BLUE, 0.18) if self._selected else Colors.BG_TERTIARY
+        if self._hover and not self._selected:
+            bg = Colors.BG_ELEVATED
+        border = Colors.BLUE if (self._selected or self._hover) else Colors.BORDER_SUBTLE
+        title = Colors.TEXT_PRIMARY if self._selected else Colors.TEXT_SECONDARY
+        self.setStyleSheet(
+            f"""
+            QFrame#ProviderPill {{
+                background-color: {bg};
+                border: 1px solid {border};
+                border-radius: 9px;
+            }}
+            QFrame#ProviderPill QLabel {{
+                background: transparent;
+                border: none;
+            }}
+            """
+        )
+        self._title.setStyleSheet(f"color: {title};")
+        self._usage.setStyleSheet(f"color: {Colors.TEXT_MUTED};")
+
+
 class Overlay(QWidget):
     request_menu = pyqtSignal(QPoint)   # right-click → show context menu
+    provider_changed = pyqtSignal(str)  # Claude/Codex segmented switch
 
     def __init__(self, config) -> None:
         super().__init__()
@@ -192,9 +292,35 @@ class Overlay(QWidget):
     # -- model ---------------------------------------------------------- #
     def _build_model(self) -> QFrame:
         card, layout = self._card(None)
-        self._model_badge = ModelBadge()
-        layout.addWidget(self._model_badge)
+        row = QHBoxLayout()
+        row.setSpacing(8)
+        self._provider_pills: dict[str, _ProviderPill] = {
+            "claude": _ProviderPill("claude", tr("provider_claude")),
+            "codex": _ProviderPill("codex", tr("provider_codex")),
+        }
+        for pill in self._provider_pills.values():
+            pill.clicked.connect(self._on_provider_clicked)
+            row.addWidget(pill, 1)
+        layout.addLayout(row)
+        self.sync_provider_switch(self.config.provider)
         return card
+
+    def _on_provider_clicked(self, provider: str) -> None:
+        if provider == self.config.provider:
+            return
+        self.sync_provider_switch(provider)
+        pill = self._provider_pills.get(provider)
+        if pill is not None:
+            pill.set_status(Colors.YELLOW, tr("connecting"))
+        self.config.set("auth.provider", provider)
+        self.config.save()
+        self._clear_tokens(provider)
+        self.provider_changed.emit(provider)
+
+    def sync_provider_switch(self, provider: str | None = None) -> None:
+        provider = provider or self.config.provider
+        for key, pill in self._provider_pills.items():
+            pill.set_selected(key == provider)
 
     # -- limity --------------------------------------------------------- #
     def _build_limity(self) -> QFrame:
@@ -354,6 +480,68 @@ class Overlay(QWidget):
             layout.addWidget(label)
         return card, layout
 
+    def _provider_for_snapshot(self, snap: UsageSnapshot) -> str:
+        return "codex" if snap and snap.model == "codex" else "claude"
+
+    def _set_provider_status(
+        self,
+        provider: str,
+        color: str,
+        usage: str,
+        model_id: str | None = None,
+    ) -> None:
+        pill = self._provider_pills.get(provider)
+        if pill is None:
+            return
+        # This switch chooses the monitoring provider. Claude OAuth usage is for
+        # the whole Claude account, so do not relabel it as a single model like
+        # Opus/Sonnet after every poll.
+        pill.set_title(tr("provider_codex") if provider == "codex" else tr("provider_claude"))
+        pill.set_status(color, usage)
+
+    def update_provider_status(self, snap: UsageSnapshot) -> None:
+        """Refresh only the small Claude/Codex provider pill.
+
+        Used for the provider that is not currently open in the detailed panel.
+        """
+        if snap is None:
+            return
+        provider = self._provider_for_snapshot(snap)
+        if not snap.ok:
+            self._set_provider_status(provider, Colors.RED, tr("offline"), snap.model)
+            return
+        self._set_provider_status(
+            provider,
+            Colors.for_utilization(snap.worst_percent),
+            f"{int(round(snap.session_percent))}% / {int(round(snap.week_percent))}%",
+            snap.model,
+        )
+
+    def _show_error_snapshot(self, snap: UsageSnapshot) -> None:
+        self._session_bar.animate_to(0)
+        self._session_pct.setText("—")
+        self._session_pct.setStyleSheet(f"color: {Colors.TEXT_MUTED}; font-weight:700;")
+        self._update_reset(self._session_reset_bar, self._session_reset, 0, "—")
+
+        self._week_bar.animate_to(0)
+        self._week_pct.setText("—")
+        self._week_pct.setStyleSheet(f"color: {Colors.TEXT_MUTED}; font-weight:700;")
+        self._update_reset(self._week_reset_bar, self._week_reset, 0, "—")
+
+        self._sub_gauge.animate_to(0)
+        self._sub_status.setText(snap.error or tr("offline"))
+        self._sub_cycle.setText("—")
+        self._sub_renews.setText("—")
+        self._sub_left.setText("—")
+
+        self._credits_badge.setText("—")
+        self._credits_pct.setText("")
+        self._credits_bar.hide()
+        self._credits_hint.show()
+        self._credits_used.setText("—")
+        self._credits_limit.setText("—")
+        self._credits_balance.setText("—")
+
     # ------------------------------------------------------------------ #
     # Data updates
     # ------------------------------------------------------------------ #
@@ -361,22 +549,26 @@ class Overlay(QWidget):
         self._snapshot = snap
         if snap is None:
             return
+        provider = self._provider_for_snapshot(snap)
+        self.sync_provider_switch(provider)
+        self._apply_provider_visibility()
 
         if not snap.ok:
             self._status_dot.setStyleSheet(f"color: {Colors.RED};")
             self._status_dot.setToolTip(tr("error_prefix", msg=snap.error))
-            self._model_badge.set_usage(tr("offline"), snap.error or "")
+            self._set_provider_status(provider, Colors.RED, tr("offline"), snap.model)
+            self._show_error_snapshot(snap)
             return
 
         self._status_dot.setStyleSheet(f"color: {Colors.GREEN};")
         self._status_dot.setToolTip(tr("connected"))
 
-        # Model badge
         worst = snap.worst_percent
-        self._model_badge.set_model(snap.model, Colors.for_utilization(worst))
-        self._model_badge.set_usage(
-            f"{int(round(snap.session_percent))}%",
-            tr("wk_prefix", pct=int(round(snap.week_percent))),
+        self._set_provider_status(
+            provider,
+            Colors.for_utilization(worst),
+            f"{int(round(snap.session_percent))}% / {int(round(snap.week_percent))}%",
+            snap.model,
         )
 
         # Limity
@@ -401,11 +593,16 @@ class Overlay(QWidget):
         )
 
         # Subscription
-        self._sub_gauge.animate_to(snap.subscription_percent)
+        # Codex exposes a 5h primary window and a weekly subscription window.
+        # The subscription card must always track the weekly window, even if an
+        # older snapshot or stale local log still carries the 5h percent.
+        subscription_percent = snap.week_percent if provider == "codex" else snap.subscription_percent
+        subscription_percent = max(0.0, min(100.0, float(subscription_percent or 0.0)))
+        self._sub_gauge.animate_to(subscription_percent)
         self._sub_status.setText(snap.plan_name)
         self._sub_cycle.setText(snap.cycle_label)
         self._sub_renews.setText(_strip_in(snap.cycle_renews_text))
-        self._sub_left.setText(f"{int(round(100 - snap.subscription_percent))}%")
+        self._sub_left.setText(f"{int(round(100 - subscription_percent))}%")
 
         # Kredyty ($)
         if snap.credits_enabled:
@@ -430,29 +627,41 @@ class Overlay(QWidget):
             self._credits_balance.setText("—")
 
         # Peak
-        self._style_peak_badge(snap.is_peak)
-        self._peak_bar.refresh()
-        from ..utils import peak_hours
+        if snap.model != "codex":
+            self._style_peak_badge(snap.is_peak)
+            self._peak_bar.refresh()
+            from ..utils import peak_hours
 
-        self._peak_next.setText(peak_hours.next_transition_text())
+            self._peak_next.setText(peak_hours.next_transition_text())
 
     def update_tokens(self, tokens: TokenUsage) -> None:
+        if getattr(tokens, "provider", self.config.provider) != self.config.provider:
+            return
         self._tokens = tokens
         if tokens is None:
             return
         self._activity_chart.set_values(tokens.hourly)
         self._refresh_token_count()
 
+    def _clear_tokens(self, provider: str) -> None:
+        self._tokens = None
+        self._tokens_number.setText("0")
+        keys = _CODEX_TOKEN_CAPTION_KEYS if provider == "codex" else _TOKEN_CAPTION_KEYS
+        self._tokens_caption.setText(tr(keys[self._active_tab]))
+        self._tokens_breakdown.setText("—")
+        self._activity_chart.set_values([0.0] * 24)
+
     def _refresh_token_count(self) -> None:
         if not self._tokens:
             return
         total = self._tokens.headline_for_tab(self._active_tab)
         self._tokens_number.setText(_fmt_tokens(total))
-        self._tokens_caption.setText(tr(_TOKEN_CAPTION_KEYS[self._active_tab]))
+        provider = getattr(self._tokens, "provider", self.config.provider)
+        keys = _CODEX_TOKEN_CAPTION_KEYS if provider == "codex" else _TOKEN_CAPTION_KEYS
+        self._tokens_caption.setText(tr(keys[self._active_tab]))
         inp, out, cache = self._tokens.breakdown_for_tab(self._active_tab)
-        self._tokens_breakdown.setText(
-            tr("tokens_breakdown", i=_fmt_tokens(inp), o=_fmt_tokens(out), c=_fmt_tokens(cache))
-        )
+        key = "tokens_codex_breakdown" if provider == "codex" else "tokens_breakdown"
+        self._tokens_breakdown.setText(tr(key, i=_fmt_tokens(inp), o=_fmt_tokens(out), c=_fmt_tokens(cache)))
 
     def refresh_dynamic(self) -> None:
         """Called ~1/s to keep countdowns and the peak marker current."""
@@ -499,19 +708,25 @@ class Overlay(QWidget):
 
     def set_compact(self, compact: bool, persist: bool = True) -> None:
         self._compact = compact
-        for card in (
-            self._sub_card,
-            self._credits_card,
-            self._peak_card,
-            self._activity_card,
-            self._model_card,
-        ):
-            card.setVisible(not compact)
+        self._apply_provider_visibility()
         self._btn_compact.setText("▴" if compact else "▾")
         self._fit_height()
         if persist:
             self.config.compact = compact
             self.config.save()
+
+    def _apply_provider_visibility(self) -> None:
+        active_provider = self.config.provider
+        if self._snapshot and self._snapshot.model == "codex":
+            active_provider = "codex"
+        is_codex = active_provider == "codex"
+        show_full = not self._compact
+        self._model_card.setVisible(True)
+        self._sub_card.setVisible(show_full)
+        self._activity_card.setVisible(show_full)
+        self._credits_card.setVisible(show_full and not is_codex)
+        self._peak_card.setVisible(show_full and not is_codex)
+        self._fit_height()
 
     def _fit_height(self) -> None:
         """Resize the frameless window to exactly fit its visible content."""

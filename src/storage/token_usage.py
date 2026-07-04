@@ -30,6 +30,7 @@ log = logging.getLogger(__name__)
 class TokenUsage:
     """Token totals for today / last 7 days / last 30 days (index 0/1/2)."""
 
+    provider: str = "claude"
     totals: tuple = (0, 0, 0)
     inputs: tuple = (0, 0, 0)
     outputs: tuple = (0, 0, 0)
@@ -40,6 +41,11 @@ class TokenUsage:
         """The 'tokens used' figure shown big: input + output (excludes cache
         reads, which would otherwise dominate and mislead)."""
         i = idx if 0 <= idx < 3 else 0
+        if self.provider == "codex":
+            # Codex sends a large working context on every model turn. Showing
+            # input + output as the headline makes the counter look wildly
+            # inflated, so Codex uses generated tokens as the headline.
+            return self.outputs[i]
         return self.inputs[i] + self.outputs[i]
 
     def breakdown_for_tab(self, idx: int) -> tuple:
@@ -134,7 +140,7 @@ class TokenUsageReader:
     # ------------------------------------------------------------------ #
     def read(self) -> TokenUsage:
         if not self._dir.exists():
-            return TokenUsage()
+            return TokenUsage(provider="claude")
 
         now = datetime.now()
         today = now.strftime("%Y-%m-%d")
@@ -189,6 +195,7 @@ class TokenUsageReader:
         wi, wo, wc = window(week)
         mi, mo, mc = window(month)
         return TokenUsage(
+            provider="claude",
             totals=(ti + to + tc, wi + wo + wc, mi + mo + mc),
             inputs=(ti, wi, mi),
             outputs=(to, wo, mo),
